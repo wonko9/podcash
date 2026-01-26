@@ -261,6 +261,10 @@ struct PodcastDetailView: View {
             )
         }
 
+        ShareLink(item: episodeShareText(for: episode)) {
+            Label("Share", systemImage: "square.and.arrow.up")
+        }
+
         Divider()
 
         if episode.localFilePath != nil {
@@ -341,7 +345,14 @@ struct PodcastDetailView: View {
         if let author = podcast.author {
             text += " by \(author)"
         }
-        text += "\n\n\(podcast.feedURL)"
+        text += "\n\n\(podcast.shareURL)"
+        return text
+    }
+
+    private func episodeShareText(for episode: Episode) -> String {
+        var text = "🎧 \(episode.title)"
+        text += "\n\(podcast.title)"
+        text += "\n\n\(podcast.shareURL)"
         return text
     }
 }

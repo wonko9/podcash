@@ -296,7 +296,7 @@ struct NowPlayingView: View {
         var text = "🎧 \(episode.title)"
         if let podcast = episode.podcast {
             text += "\n\(podcast.title)"
-            text += "\n\n\(podcast.feedURL)"
+            text += "\n\n\(podcast.shareURL)"
         }
         return text
     }

@@ -54,9 +54,7 @@ struct AddPodcastView: View {
         }
         podcast.episodes = episodes
 
-        await MainActor.run {
-            dismiss()
-        }
+        // Don't dismiss - stay on current tab for adding more
     }
 }
 
@@ -70,10 +68,22 @@ private struct SearchPodcastView: View {
     @State private var isSearching = false
     @State private var isAdding = false
     @State private var errorMessage: String?
+    @State private var successMessage: String?
     @State private var addingID: String?
+    @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         List {
+            if let successMessage {
+                Section {
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text(successMessage)
+                    }
+                }
+            }
+
             if let errorMessage {
                 Section {
                     Text(errorMessage)
@@ -99,6 +109,7 @@ private struct SearchPodcastView: View {
         }
         .listStyle(.plain)
         .searchable(text: $searchText, prompt: "Search podcasts")
+        .focused($isSearchFocused)
         .onChange(of: searchText) { _, newValue in
             Task {
                 await performSearch(query: newValue)
@@ -107,6 +118,12 @@ private struct SearchPodcastView: View {
         .overlay {
             if isSearching && results.isEmpty {
                 ProgressView("Searching...")
+            }
+        }
+        .onAppear {
+            // Auto-focus search field
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                isSearchFocused = true
             }
         }
     }
@@ -141,9 +158,11 @@ private struct SearchPodcastView: View {
 
         addingID = result.id
         errorMessage = nil
+        successMessage = nil
 
         do {
             try await onAdd(feedURL)
+            successMessage = "Added \(result.title)"
         } catch let error as AddPodcastError {
             errorMessage = error.localizedDescription
         } catch {
@@ -222,6 +241,9 @@ private struct URLPodcastView: View {
     @State private var feedURL: String = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var successMessage: String?
+    @State private var clipboardURL: String?
+    @FocusState private var isURLFocused: Bool
 
     var body: some View {
         Form {
@@ -231,8 +253,35 @@ private struct URLPodcastView: View {
                     .keyboardType(.URL)
                     .autocapitalization(.none)
                     .autocorrectionDisabled()
+                    .focused($isURLFocused)
+
+                if let clipboardURL, feedURL.isEmpty {
+                    Button {
+                        feedURL = clipboardURL
+                    } label: {
+                        HStack {
+                            Image(systemName: "doc.on.clipboard")
+                            Text("Paste from clipboard")
+                            Spacer()
+                            Text(clipboardURL.prefix(30) + (clipboardURL.count > 30 ? "..." : ""))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
             } footer: {
                 Text("Supports RSS feeds, Apple Podcasts links, and Pocket Casts links.")
+            }
+
+            if let successMessage {
+                Section {
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text(successMessage)
+                    }
+                }
             }
 
             if let errorMessage {
@@ -257,6 +306,29 @@ private struct URLPodcastView: View {
                 .disabled(feedURL.isEmpty || isLoading)
             }
         }
+        .onAppear {
+            // Auto-focus URL field
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                isURLFocused = true
+            }
+            // Check clipboard for URL
+            checkClipboard()
+        }
+        .onChange(of: isURLFocused) { _, focused in
+            if focused {
+                checkClipboard()
+            }
+        }
+    }
+
+    private func checkClipboard() {
+        if let string = UIPasteboard.general.string,
+           let url = URL(string: string),
+           url.scheme == "http" || url.scheme == "https" {
+            clipboardURL = string
+        } else {
+            clipboardURL = nil
+        }
     }
 
     private func addPodcast() {
@@ -267,12 +339,18 @@ private struct URLPodcastView: View {
 
         isLoading = true
         errorMessage = nil
+        successMessage = nil
 
         Task {
             do {
                 // Resolve URL to RSS feed
                 let resolvedURL = try await PodcastLookupService.shared.resolveToRSSFeed(url: urlString)
                 try await onAdd(resolvedURL)
+                await MainActor.run {
+                    successMessage = "Podcast added successfully"
+                    feedURL = "" // Clear for next add
+                    isLoading = false
+                }
             } catch let error as AddPodcastError {
                 await MainActor.run {
                     errorMessage = error.localizedDescription

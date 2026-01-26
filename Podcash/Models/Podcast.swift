@@ -9,9 +9,42 @@ final class Podcast {
     var artworkURL: String?
     var podcastDescription: String?
 
+    // Public feed URL for sharing (if this is a private feed)
+    var publicFeedURL: String?
+
     // Per-podcast settings
     var playbackSpeedOverride: Double?  // nil = use global setting
     var autoDownloadCount: Int = 0       // 0 = disabled
+
+    /// Whether this podcast uses a private feed URL (Patreon, Substack, etc.)
+    var isPrivateFeed: Bool {
+        guard let url = URL(string: feedURL) else { return false }
+        let host = url.host?.lowercased() ?? ""
+        let path = url.path.lowercased()
+        let query = url.query?.lowercased() ?? ""
+
+        // Known private feed hosts
+        if host.contains("patreon.com") || host.contains("substack.com") {
+            return true
+        }
+
+        // URL contains auth tokens
+        if query.contains("auth=") || query.contains("token=") || query.contains("key=") {
+            return true
+        }
+
+        // Path contains private indicators
+        if path.contains("/private/") || path.contains("/premium/") || path.contains("/member/") {
+            return true
+        }
+
+        return false
+    }
+
+    /// The URL to use when sharing (public if available, otherwise feed URL)
+    var shareURL: String {
+        publicFeedURL ?? feedURL
+    }
 
     // Relationships
     @Relationship(deleteRule: .cascade, inverse: \Episode.podcast)

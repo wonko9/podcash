@@ -4,11 +4,15 @@ import SwiftData
 struct EditFolderView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Query(sort: \Podcast.title) private var allPodcasts: [Podcast]
 
     let folder: Folder?
 
     @State private var name: String = ""
     @State private var selectedColor: String = "007AFF" // Default blue
+    @State private var selectedPodcasts: Set<String> = [] // Feed URLs
+    @State private var showManagePodcasts = false
+    @State private var createdFolder: Folder?
 
     private let colorOptions = [
         "007AFF", // Blue
@@ -52,6 +56,25 @@ struct EditFolderView: View {
                     }
                     .padding(.vertical, 8)
                 }
+
+                // Show podcasts section for editing existing folders
+                if isEditing, let folder = folder {
+                    Section {
+                        Button {
+                            showManagePodcasts = true
+                        } label: {
+                            HStack {
+                                Text("Podcasts in folder")
+                                Spacer()
+                                Text("\(folder.podcasts.count)")
+                                    .foregroundStyle(.secondary)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
             }
             .navigationTitle(isEditing ? "Edit Folder" : "New Folder")
             .navigationBarTitleDisplayMode(.inline)
@@ -73,6 +96,17 @@ struct EditFolderView: View {
                 if let folder = folder {
                     name = folder.name
                     selectedColor = folder.colorHex ?? "007AFF"
+                    selectedPodcasts = Set(folder.podcasts.map { $0.feedURL })
+                }
+            }
+            .sheet(isPresented: $showManagePodcasts) {
+                if let folder = folder ?? createdFolder {
+                    ManageFolderPodcastsSheet(folder: folder, allPodcasts: allPodcasts)
+                }
+            }
+            .onChange(of: createdFolder) { _, newFolder in
+                if newFolder != nil {
+                    showManagePodcasts = true
                 }
             }
         }
@@ -86,18 +120,99 @@ struct EditFolderView: View {
             // Edit existing
             folder.name = trimmedName
             folder.colorHex = selectedColor
+            try? modelContext.save()
+            dismiss()
         } else {
-            // Create new
+            // Create new - then show podcast picker
             let newFolder = Folder(name: trimmedName, colorHex: selectedColor)
             modelContext.insert(newFolder)
+            try? modelContext.save()
+            createdFolder = newFolder
         }
+    }
+}
 
+// MARK: - Manage Folder Podcasts Sheet
+
+private struct ManageFolderPodcastsSheet: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+
+    @Bindable var folder: Folder
+    let allPodcasts: [Podcast]
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if allPodcasts.isEmpty {
+                    ContentUnavailableView(
+                        "No Podcasts",
+                        systemImage: "mic",
+                        description: Text("Add podcasts to your library first")
+                    )
+                } else {
+                    Section {
+                        ForEach(allPodcasts) { podcast in
+                            Button {
+                                togglePodcast(podcast)
+                            } label: {
+                                HStack {
+                                    // Podcast artwork
+                                    CachedAsyncImage(url: URL(string: podcast.artworkURL ?? "")) { image in
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                    } placeholder: {
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(Color.secondary.opacity(0.2))
+                                    }
+                                    .frame(width: 44, height: 44)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                                    Text(podcast.title)
+                                        .foregroundStyle(.primary)
+
+                                    Spacer()
+
+                                    if isInFolder(podcast) {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(Color.accentColor)
+                                    }
+                                }
+                            }
+                        }
+                    } footer: {
+                        Text("Tap to add or remove podcasts from this folder")
+                    }
+                }
+            }
+            .navigationTitle("Add Podcasts")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    private func isInFolder(_ podcast: Podcast) -> Bool {
+        folder.podcasts.contains { $0.feedURL == podcast.feedURL }
+    }
+
+    private func togglePodcast(_ podcast: Podcast) {
+        if let index = folder.podcasts.firstIndex(where: { $0.feedURL == podcast.feedURL }) {
+            folder.podcasts.remove(at: index)
+        } else {
+            folder.podcasts.append(podcast)
+        }
         try? modelContext.save()
-        dismiss()
     }
 }
 
 #Preview {
     EditFolderView(folder: nil)
-        .modelContainer(for: Folder.self, inMemory: true)
+        .modelContainer(for: [Folder.self, Podcast.self], inMemory: true)
 }

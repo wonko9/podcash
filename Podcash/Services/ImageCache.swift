@@ -8,9 +8,12 @@ actor ImageCache {
     private let memoryCache = NSCache<NSString, UIImage>()
     private let fileManager = FileManager.default
     private var cacheDirectory: URL?
+    private var inFlightRequests: [String: Task<UIImage?, Never>] = [:]
 
     private init() {
-        memoryCache.countLimit = 100
+        // Increase memory cache limits
+        memoryCache.countLimit = 200
+        memoryCache.totalCostLimit = 100 * 1024 * 1024 // 100 MB
         setupCacheDirectory()
     }
 
@@ -27,32 +30,66 @@ actor ImageCache {
     func image(for url: URL) async -> UIImage? {
         let key = cacheKey(for: url)
 
-        // Check memory cache
+        // Check memory cache first
         if let cached = memoryCache.object(forKey: key as NSString) {
             return cached
         }
 
         // Check disk cache
         if let diskImage = loadFromDisk(key: key) {
-            memoryCache.setObject(diskImage, forKey: key as NSString)
+            memoryCache.setObject(diskImage, forKey: key as NSString, cost: diskImage.jpegData(compressionQuality: 1.0)?.count ?? 0)
             return diskImage
         }
 
-        // Download
-        guard let (data, _) = try? await URLSession.shared.data(from: url),
-              let image = UIImage(data: data) else {
-            return nil
+        // Check if already downloading
+        if let existingTask = inFlightRequests[key] {
+            return await existingTask.value
         }
 
-        // Store in caches
-        memoryCache.setObject(image, forKey: key as NSString)
-        saveToDisk(image: image, key: key)
+        // Download
+        let task = Task<UIImage?, Never> {
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let image = UIImage(data: data) else {
+                return nil
+            }
 
-        return image
+            // Store in caches
+            let cost = data.count
+            memoryCache.setObject(image, forKey: key as NSString, cost: cost)
+            saveToDisk(image: image, key: key)
+
+            return image
+        }
+
+        inFlightRequests[key] = task
+        let result = await task.value
+        inFlightRequests.removeValue(forKey: key)
+
+        return result
+    }
+
+    /// Preload an image into cache
+    func preload(url: URL) async {
+        _ = await image(for: url)
+    }
+
+    /// Check if image is already cached (memory or disk)
+    func isCached(url: URL) -> Bool {
+        let key = cacheKey(for: url)
+
+        // Check memory
+        if memoryCache.object(forKey: key as NSString) != nil {
+            return true
+        }
+
+        // Check disk
+        guard let cacheDir = cacheDirectory else { return false }
+        let fileURL = cacheDir.appendingPathComponent(key)
+        return fileManager.fileExists(atPath: fileURL.path)
     }
 
     private func cacheKey(for url: URL) -> String {
-        // Create a safe filename from URL using SHA256 hash
+        // Create a safe filename from URL using hash
         let urlString = url.absoluteString
         guard let data = urlString.data(using: .utf8) else {
             return UUID().uuidString + ".jpg"
@@ -97,7 +134,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     @ViewBuilder let placeholder: () -> Placeholder
 
     @State private var image: UIImage?
-    @State private var isLoading = false
+    @State private var loadingURL: URL?
 
     var body: some View {
         Group {
@@ -105,24 +142,34 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
                 content(Image(uiImage: image))
             } else {
                 placeholder()
-                    .task(id: url) {
-                        await loadImage()
-                    }
             }
+        }
+        .task(id: url) {
+            await loadImage()
         }
     }
 
     private func loadImage() async {
-        guard let url = url, !isLoading else { return }
-        isLoading = true
-
-        if let cachedImage = await ImageCache.shared.image(for: url) {
-            await MainActor.run {
-                self.image = cachedImage
-            }
+        guard let url = url else {
+            image = nil
+            return
         }
 
-        isLoading = false
+        // Don't reload if same URL and already have image
+        if loadingURL == url && image != nil {
+            return
+        }
+
+        loadingURL = url
+
+        if let cachedImage = await ImageCache.shared.image(for: url) {
+            // Only update if URL hasn't changed
+            if loadingURL == url {
+                await MainActor.run {
+                    self.image = cachedImage
+                }
+            }
+        }
     }
 }
 
