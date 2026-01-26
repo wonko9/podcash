@@ -1,0 +1,54 @@
+name: Podcash
+options:
+  bundleIdPrefix: com.personal
+  deploymentTarget:
+    iOS: "18.0"
+  generateEmptyDirectories: true
+
+packages:
+  FeedKit:
+    url: https://github.com/nmdias/FeedKit
+    from: "9.1.2"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+  Podcash:
+    type: application
+    platform: iOS
+    sources:
+      - Podcash
+    dependencies:
+      - package: FeedKit
+    settings:
+      base:
+        INFOPLIST_FILE: Podcash/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.personal.podcash
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+    info:
+      path: Podcash/Info.plist
+      properties:
+        UILaunchScreen:
+          UIColorName: ""
+        UIBackgroundModes:
+          - audio
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        CFBundleDisplayName: Podcash
+
+schemes:
+  Podcash:
+    build:
+      targets:
+        Podcash: all
+    run:
+      config: Debug
