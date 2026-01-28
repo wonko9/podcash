@@ -25,6 +25,11 @@ struct AllEpisodesView: View {
     @State private var podcastForNewFolder: Podcast?
     @State private var displayLimit = 100  // Start with 100, load more on scroll
 
+    // Cached computations - updated only when dependencies change
+    @State private var cachedPodcastsInFolders: Set<String> = []
+    @State private var cachedFilteredEpisodes: [Episode] = []
+    @State private var cachedEpisodeCount: Int = 0
+
     private var refreshManager: RefreshManager { RefreshManager.shared }
 
     enum ViewMode: String, CaseIterable {
@@ -32,28 +37,12 @@ struct AllEpisodesView: View {
         case episodes = "Episodes"
     }
 
-    // Set of podcast feed URLs that are in folders (for unsorted filter)
-    private var podcastsInFolders: Set<String> {
-        Set(allFolders.flatMap { $0.podcasts.map { $0.feedURL } })
-    }
-
-    // Podcasts based on filter mode
+    // Podcasts based on filter mode (uses cached set)
     private var podcasts: [Podcast] {
         if showUnsortedOnly {
-            return allPodcasts.filter { !podcastsInFolders.contains($0.feedURL) }
+            return allPodcasts.filter { !cachedPodcastsInFolders.contains($0.feedURL) }
         }
         return Array(allPodcasts)
-    }
-
-    // Episodes filtered for unsorted mode (if needed)
-    private var baseEpisodes: [Episode] {
-        if showUnsortedOnly {
-            return allEpisodes.filter { episode in
-                guard let feedURL = episode.podcast?.feedURL else { return false }
-                return !podcastsInFolders.contains(feedURL)
-            }
-        }
-        return Array(allEpisodes)
     }
 
     private var title: String {
@@ -115,10 +104,13 @@ struct AllEpisodesView: View {
             if !networkMonitor.isConnected {
                 showDownloadedOnly = true
             }
+            rebuildCaches()
         }
-        .onChange(of: sortNewestFirst) { _, _ in displayLimit = 100 }
-        .onChange(of: showStarredOnly) { _, _ in displayLimit = 100 }
-        .onChange(of: showDownloadedOnly) { _, _ in displayLimit = 100 }
+        .onChange(of: sortNewestFirst) { _, _ in displayLimit = 100; rebuildFilteredEpisodes() }
+        .onChange(of: showStarredOnly) { _, _ in displayLimit = 100; rebuildFilteredEpisodes() }
+        .onChange(of: showDownloadedOnly) { _, _ in displayLimit = 100; rebuildFilteredEpisodes() }
+        .onChange(of: allEpisodes.count) { _, _ in rebuildCaches() }
+        .onChange(of: allFolders.count) { _, _ in rebuildCaches() }
         .alert("Download on Cellular?", isPresented: $showCellularConfirmation) {
             Button("Download") {
                 if let episode = episodePendingDownload {
@@ -339,35 +331,16 @@ struct AllEpisodesView: View {
     /// How many more episodes to load when scrolling
     private let loadMoreIncrement = 50
 
-    /// Filtered episodes without tuple conversion (fast for counting)
-    private var filteredEpisodesRaw: [Episode] {
-        var episodes = baseEpisodes
-
-        if showStarredOnly {
-            episodes = episodes.filter { $0.isStarred }
-        }
-
-        if showDownloadedOnly {
-            episodes = episodes.filter { $0.localFilePath != nil }
-        }
-
-        if !sortNewestFirst {
-            return episodes.reversed()
-        }
-
-        return episodes
-    }
-
     /// Only create tuples for episodes we're actually displaying (expensive podcast lookup)
     private var filteredEpisodes: [(episode: Episode, podcast: Podcast)] {
-        filteredEpisodesRaw.prefix(displayLimit).compactMap { episode in
+        cachedFilteredEpisodes.prefix(displayLimit).compactMap { episode in
             guard let podcast = episode.podcast else { return nil }
             return (episode: episode, podcast: podcast)
         }
     }
 
     private var totalEpisodeCount: Int {
-        filteredEpisodesRaw.count
+        cachedEpisodeCount
     }
 
     private var hasMoreEpisodes: Bool {
@@ -378,6 +351,43 @@ struct AllEpisodesView: View {
         if hasMoreEpisodes {
             displayLimit += loadMoreIncrement
         }
+    }
+
+    // MARK: - Cache Management
+
+    private func rebuildCaches() {
+        // Rebuild podcastsInFolders set
+        cachedPodcastsInFolders = Set(allFolders.flatMap { $0.podcasts.map { $0.feedURL } })
+        rebuildFilteredEpisodes()
+    }
+
+    private func rebuildFilteredEpisodes() {
+        // Get base episodes (filtered for unsorted mode if needed)
+        var episodes: [Episode]
+        if showUnsortedOnly {
+            episodes = allEpisodes.filter { episode in
+                guard let feedURL = episode.podcast?.feedURL else { return false }
+                return !cachedPodcastsInFolders.contains(feedURL)
+            }
+        } else {
+            episodes = Array(allEpisodes)
+        }
+
+        // Apply filters
+        if showStarredOnly {
+            episodes = episodes.filter { $0.isStarred }
+        }
+        if showDownloadedOnly {
+            episodes = episodes.filter { $0.localFilePath != nil }
+        }
+
+        // Apply sort (allEpisodes is already sorted newest first from @Query)
+        if !sortNewestFirst {
+            episodes = episodes.reversed()
+        }
+
+        cachedFilteredEpisodes = episodes
+        cachedEpisodeCount = episodes.count
     }
 
     // MARK: - Empty State

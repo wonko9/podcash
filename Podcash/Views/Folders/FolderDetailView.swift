@@ -25,6 +25,12 @@ struct FolderDetailView: View {
     @State private var podcastToUnsubscribe: Podcast?
     @State private var displayLimit = 100  // Start with 100, load more on scroll
 
+    // Cached computations - updated only when dependencies change
+    @State private var cachedPodcastsInFolder: [Podcast] = []
+    @State private var cachedPodcastByGuid: [String: Podcast] = [:]
+    @State private var cachedFilteredEpisodes: [Episode] = []
+    @State private var cachedEpisodeCount: Int = 0
+
     private var refreshManager: RefreshManager { RefreshManager.shared }
 
     enum ViewMode: String, CaseIterable {
@@ -32,32 +38,9 @@ struct FolderDetailView: View {
         case episodes = "Episodes"
     }
 
-    // Get podcasts in this folder by checking the relationship
-    private var podcastsInFolder: [Podcast] {
-        allPodcasts.filter { podcast in
-            folder.podcasts.contains { $0.feedURL == podcast.feedURL }
-        }
-    }
-
-    // Dictionary for fast podcast lookup by episode
-    private var podcastByEpisodeGuid: [String: Podcast] {
-        var dict: [String: Podcast] = [:]
-        for podcast in podcastsInFolder {
-            for episode in podcast.episodes {
-                dict[episode.guid] = podcast
-            }
-        }
-        return dict
-    }
-
-    // Get all episodes in folder (without creating tuples yet)
-    private var allEpisodesInFolder: [Episode] {
-        podcastsInFolder.flatMap { $0.episodes }
-    }
-
     var body: some View {
         Group {
-            if podcastsInFolder.isEmpty {
+            if cachedPodcastsInFolder.isEmpty {
                 ContentUnavailableView(
                     "No Podcasts",
                     systemImage: "folder",
@@ -97,7 +80,7 @@ struct FolderDetailView: View {
                 .listStyle(.plain)
                 .refreshable {
                     // Trigger background refresh and return immediately
-                    refreshManager.refreshPodcasts(podcastsInFolder, context: modelContext)
+                    refreshManager.refreshPodcasts(cachedPodcastsInFolder, context: modelContext)
                 }
             }
         }
@@ -156,10 +139,13 @@ struct FolderDetailView: View {
             if !networkMonitor.isConnected {
                 showDownloadedOnly = true
             }
+            rebuildCaches()
         }
-        .onChange(of: sortNewestFirst) { _, _ in displayLimit = 100 }
-        .onChange(of: showStarredOnly) { _, _ in displayLimit = 100 }
-        .onChange(of: showDownloadedOnly) { _, _ in displayLimit = 100 }
+        .onChange(of: sortNewestFirst) { _, _ in displayLimit = 100; rebuildFilteredEpisodes() }
+        .onChange(of: showStarredOnly) { _, _ in displayLimit = 100; rebuildFilteredEpisodes() }
+        .onChange(of: showDownloadedOnly) { _, _ in displayLimit = 100; rebuildFilteredEpisodes() }
+        .onChange(of: folder.podcasts.count) { _, _ in rebuildCaches() }
+        .onChange(of: allPodcasts.count) { _, _ in rebuildCaches() }
         .alert("Download on Cellular?", isPresented: $showCellularConfirmation) {
             Button("Download") {
                 if let episode = episodePendingDownload {
@@ -204,7 +190,7 @@ struct FolderDetailView: View {
     @ViewBuilder
     private var podcastsView: some View {
         Section {
-            ForEach(podcastsInFolder) { podcast in
+            ForEach(cachedPodcastsInFolder) { podcast in
                 NavigationLink {
                     PodcastDetailView(podcast: podcast)
                 } label: {
@@ -239,7 +225,7 @@ struct FolderDetailView: View {
                 }
             }
         } header: {
-            Text("\(podcastsInFolder.count) Podcasts")
+            Text("\(cachedPodcastsInFolder.count) Podcasts")
         }
     }
 
@@ -387,36 +373,16 @@ struct FolderDetailView: View {
     /// How many more episodes to load when scrolling
     private let loadMoreIncrement = 50
 
-    /// Filtered and sorted episodes without tuple conversion (fast for counting)
-    private var filteredEpisodesRaw: [Episode] {
-        var episodes = allEpisodesInFolder
-
-        if showStarredOnly {
-            episodes = episodes.filter { $0.isStarred }
-        }
-
-        if showDownloadedOnly {
-            episodes = episodes.filter { $0.localFilePath != nil }
-        }
-
-        return episodes.sorted { e1, e2 in
-            let date1 = e1.publishedDate ?? .distantPast
-            let date2 = e2.publishedDate ?? .distantPast
-            return sortNewestFirst ? date1 > date2 : date1 < date2
-        }
-    }
-
     /// Only create tuples for episodes we're actually displaying
     private var filteredEpisodes: [(episode: Episode, podcast: Podcast)] {
-        let lookup = podcastByEpisodeGuid
-        return filteredEpisodesRaw.prefix(displayLimit).compactMap { episode in
-            guard let podcast = lookup[episode.guid] else { return nil }
+        cachedFilteredEpisodes.prefix(displayLimit).compactMap { episode in
+            guard let podcast = cachedPodcastByGuid[episode.guid] else { return nil }
             return (episode: episode, podcast: podcast)
         }
     }
 
     private var totalEpisodeCount: Int {
-        filteredEpisodesRaw.count
+        cachedEpisodeCount
     }
 
     private var hasMoreEpisodes: Bool {
@@ -427,6 +393,49 @@ struct FolderDetailView: View {
         if hasMoreEpisodes {
             displayLimit += loadMoreIncrement
         }
+    }
+
+    // MARK: - Cache Management
+
+    private func rebuildCaches() {
+        // Rebuild podcasts in folder
+        cachedPodcastsInFolder = allPodcasts.filter { podcast in
+            folder.podcasts.contains { $0.feedURL == podcast.feedURL }
+        }
+
+        // Rebuild podcast lookup dictionary
+        var dict: [String: Podcast] = [:]
+        for podcast in cachedPodcastsInFolder {
+            for episode in podcast.episodes {
+                dict[episode.guid] = podcast
+            }
+        }
+        cachedPodcastByGuid = dict
+
+        rebuildFilteredEpisodes()
+    }
+
+    private func rebuildFilteredEpisodes() {
+        // Get all episodes from cached podcasts
+        var episodes = cachedPodcastsInFolder.flatMap { $0.episodes }
+
+        // Apply filters
+        if showStarredOnly {
+            episodes = episodes.filter { $0.isStarred }
+        }
+        if showDownloadedOnly {
+            episodes = episodes.filter { $0.localFilePath != nil }
+        }
+
+        // Sort
+        episodes.sort { e1, e2 in
+            let date1 = e1.publishedDate ?? .distantPast
+            let date2 = e2.publishedDate ?? .distantPast
+            return sortNewestFirst ? date1 > date2 : date1 < date2
+        }
+
+        cachedFilteredEpisodes = episodes
+        cachedEpisodeCount = episodes.count
     }
 
     // MARK: - Empty State
