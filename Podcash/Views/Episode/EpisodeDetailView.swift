@@ -55,7 +55,7 @@ struct EpisodeDetailView: View {
                         // Metadata row
                         HStack(spacing: 16) {
                             if let date = episode.publishedDate {
-                                Label(date.relativeFormatted, systemImage: "calendar")
+                                Label(date.fullFormatted, systemImage: "calendar")
                             }
 
                             if let duration = episode.duration {
