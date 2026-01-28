@@ -229,6 +229,7 @@ private struct StarredEpisodeRow: View {
 
                     if let podcast = episode.podcast {
                         Text(podcast.title)
+                            .lineLimit(1)
                     }
                     if let date = episode.publishedDate {
                         Text("•")

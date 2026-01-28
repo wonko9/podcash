@@ -230,6 +230,7 @@ private struct DownloadedEpisodeRow: View {
 
                     if let podcast = episode.podcast {
                         Text(podcast.title)
+                            .lineLimit(1)
                     }
                     if let duration = episode.duration {
                         Text("•")
