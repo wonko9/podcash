@@ -2,11 +2,18 @@ import SwiftUI
 
 struct ContentView: View {
     private var playerManager = AudioPlayerManager.shared
+    private var refreshManager = RefreshManager.shared
     @State private var showNowPlaying = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            TabView {
+            VStack(spacing: 0) {
+                // Global refresh status banner
+                if refreshManager.isRefreshing {
+                    RefreshStatusBanner()
+                }
+
+                TabView {
                 LibraryView()
                     .tabItem {
                         Label("Library", systemImage: "books.vertical")
@@ -31,6 +38,7 @@ struct ContentView: View {
                     .tabItem {
                         Label("Settings", systemImage: "gear")
                     }
+                }
             }
 
             if playerManager.currentEpisode != nil {

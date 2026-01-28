@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 
+@MainActor
 @Observable
 final class RefreshManager {
     static let shared = RefreshManager()
@@ -17,7 +18,7 @@ final class RefreshManager {
     func refreshAllPodcasts(context: ModelContext) {
         guard !isRefreshing else { return }
 
-        Task { @MainActor in
+        Task {
             isRefreshing = true
             refreshProgress = 0
             refreshedCount = 0
@@ -30,8 +31,13 @@ final class RefreshManager {
 
             totalCount = podcasts.count
 
+            // Refresh each podcast with low priority to avoid blocking UI
             for (index, podcast) in podcasts.enumerated() {
+                // Yield to let UI updates happen
+                await Task.yield()
+
                 _ = try? await FeedService.shared.refreshPodcast(podcast, context: context)
+
                 refreshedCount = index + 1
                 refreshProgress = Double(refreshedCount) / Double(totalCount)
             }
@@ -45,14 +51,18 @@ final class RefreshManager {
     func refreshPodcasts(_ podcasts: [Podcast], context: ModelContext) {
         guard !isRefreshing else { return }
 
-        Task { @MainActor in
+        Task {
             isRefreshing = true
             refreshProgress = 0
             refreshedCount = 0
             totalCount = podcasts.count
 
             for (index, podcast) in podcasts.enumerated() {
+                // Yield to let UI updates happen
+                await Task.yield()
+
                 _ = try? await FeedService.shared.refreshPodcast(podcast, context: context)
+
                 refreshedCount = index + 1
                 refreshProgress = Double(refreshedCount) / Double(totalCount)
             }

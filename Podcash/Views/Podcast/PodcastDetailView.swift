@@ -19,6 +19,8 @@ struct PodcastDetailView: View {
     @State private var isPreparingShare = false
     @State private var showCellularConfirmation = false
     @State private var episodePendingDownload: Episode?
+    @State private var selectedEpisode: Episode?
+    @State private var displayLimit = 100  // Start with 100, load more on scroll
 
     var body: some View {
         List {
@@ -107,21 +109,27 @@ struct PodcastDetailView: View {
                         description: Text(emptyStateDescription)
                     )
                 } else {
-                    ForEach(filteredEpisodes) { episode in
-                        NavigationLink {
-                            EpisodeDetailView(episode: episode)
-                        } label: {
-                            EpisodeRowView(episode: episode)
-                        }
-                        .contextMenu {
-                            EpisodeContextMenu(
-                                episode: episode,
-                                onDownloadNeedsConfirmation: {
-                                    episodePendingDownload = episode
-                                    showCellularConfirmation = true
+                    ForEach(Array(filteredEpisodes.enumerated()), id: \.element.guid) { index, episode in
+                        EpisodeRowView(episode: episode)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selectedEpisode = episode
+                            }
+                            .onAppear {
+                                // Load more when approaching the end
+                                if index >= filteredEpisodes.count - 10 && hasMoreEpisodes {
+                                    loadMoreEpisodes()
                                 }
-                            )
-                        }
+                            }
+                            .contextMenu {
+                                EpisodeContextMenu(
+                                    episode: episode,
+                                    onDownloadNeedsConfirmation: {
+                                        episodePendingDownload = episode
+                                        showCellularConfirmation = true
+                                    }
+                                )
+                            }
                             .swipeActions(edge: .leading) {
                                 Button {
                                     toggleStar(episode)
@@ -149,9 +157,26 @@ struct PodcastDetailView: View {
                                 .tint(.blue)
                             }
                     }
+
+                    // Loading indicator at bottom
+                    if hasMoreEpisodes {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                                .onAppear {
+                                    loadMoreEpisodes()
+                                }
+                            Spacer()
+                        }
+                        .listRowBackground(Color.clear)
+                    }
                 }
             } header: {
-                Text("\(filteredEpisodes.count) Episodes")
+                if hasMoreEpisodes {
+                    Text("Showing \(filteredEpisodes.count) of \(totalEpisodeCount) Episodes")
+                } else {
+                    Text("\(totalEpisodeCount) Episodes")
+                }
             }
         }
         .listStyle(.plain)
@@ -231,6 +256,9 @@ struct PodcastDetailView: View {
         } message: {
             Text("You're on cellular data. Download anyway?")
         }
+        .sheet(item: $selectedEpisode) { episode in
+            EpisodeDetailView(episode: episode)
+        }
         .onAppear {
             // Auto-filter to downloaded when offline
             if !networkMonitor.isConnected {
@@ -245,9 +273,15 @@ struct PodcastDetailView: View {
                 }
             }
         }
+        .onChange(of: sortNewestFirst) { _, _ in displayLimit = 100 }
+        .onChange(of: showStarredOnly) { _, _ in displayLimit = 100 }
+        .onChange(of: showDownloadedOnly) { _, _ in displayLimit = 100 }
     }
 
-    private var filteredEpisodes: [Episode] {
+    /// How many more episodes to load when scrolling
+    private let loadMoreIncrement = 50
+
+    private var allFilteredEpisodes: [Episode] {
         var episodes = podcast.episodes
 
         if showStarredOnly {
@@ -262,6 +296,24 @@ struct PodcastDetailView: View {
             let date1 = e1.publishedDate ?? .distantPast
             let date2 = e2.publishedDate ?? .distantPast
             return sortNewestFirst ? date1 > date2 : date1 < date2
+        }
+    }
+
+    private var filteredEpisodes: [Episode] {
+        Array(allFilteredEpisodes.prefix(displayLimit))
+    }
+
+    private var totalEpisodeCount: Int {
+        allFilteredEpisodes.count
+    }
+
+    private var hasMoreEpisodes: Bool {
+        displayLimit < totalEpisodeCount
+    }
+
+    private func loadMoreEpisodes() {
+        if hasMoreEpisodes {
+            displayLimit += loadMoreIncrement
         }
     }
 

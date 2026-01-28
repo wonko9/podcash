@@ -11,8 +11,13 @@ struct StarredView: View {
     @State private var showDownloadedOnly = false
     @State private var showCellularConfirmation = false
     @State private var episodePendingDownload: Episode?
+    @State private var selectedEpisode: Episode?
+    @State private var displayLimit = 100  // Start with 100, load more on scroll
 
-    private var starredEpisodes: [Episode] {
+    /// How many more episodes to load when scrolling
+    private let loadMoreIncrement = 50
+
+    private var allStarredEpisodes: [Episode] {
         var episodes = allEpisodes.filter { $0.isStarred }
 
         if showDownloadedOnly {
@@ -23,6 +28,24 @@ struct StarredView: View {
             let date1 = e1.publishedDate ?? .distantPast
             let date2 = e2.publishedDate ?? .distantPast
             return sortNewestFirst ? date1 > date2 : date1 < date2
+        }
+    }
+
+    private var starredEpisodes: [Episode] {
+        Array(allStarredEpisodes.prefix(displayLimit))
+    }
+
+    private var totalStarredCount: Int {
+        allStarredEpisodes.count
+    }
+
+    private var hasMoreStarred: Bool {
+        displayLimit < totalStarredCount
+    }
+
+    private func loadMoreStarred() {
+        if hasMoreStarred {
+            displayLimit += loadMoreIncrement
         }
     }
 
@@ -89,8 +112,18 @@ struct StarredView: View {
                                     description: Text("Download starred episodes to see them here")
                                 )
                             } else {
-                                ForEach(starredEpisodes) { episode in
+                                ForEach(Array(starredEpisodes.enumerated()), id: \.element.guid) { index, episode in
                                     StarredEpisodeRow(episode: episode)
+                                        .contentShape(Rectangle())
+                                        .onTapGesture {
+                                            selectedEpisode = episode
+                                        }
+                                        .onAppear {
+                                            // Load more when approaching the end
+                                            if index >= starredEpisodes.count - 10 && hasMoreStarred {
+                                                loadMoreStarred()
+                                            }
+                                        }
                                         .contextMenu {
                                             EpisodeContextMenu(
                                                 episode: episode,
@@ -101,9 +134,26 @@ struct StarredView: View {
                                             )
                                         }
                                 }
+
+                                // Loading indicator at bottom
+                                if hasMoreStarred {
+                                    HStack {
+                                        Spacer()
+                                        ProgressView()
+                                            .onAppear {
+                                                loadMoreStarred()
+                                            }
+                                        Spacer()
+                                    }
+                                    .listRowBackground(Color.clear)
+                                }
                             }
                         } header: {
-                            Text("\(starredEpisodes.count) Episodes")
+                            if hasMoreStarred {
+                                Text("Showing \(starredEpisodes.count) of \(totalStarredCount) Episodes")
+                            } else {
+                                Text("\(totalStarredCount) Episodes")
+                            }
                         }
                     }
                 }
@@ -115,6 +165,8 @@ struct StarredView: View {
                     showDownloadedOnly = true
                 }
             }
+            .onChange(of: sortNewestFirst) { _, _ in displayLimit = 100 }
+            .onChange(of: showDownloadedOnly) { _, _ in displayLimit = 100 }
             .alert("Download on Cellular?", isPresented: $showCellularConfirmation) {
                 Button("Download") {
                     if let episode = episodePendingDownload {
@@ -127,6 +179,9 @@ struct StarredView: View {
                 }
             } message: {
                 Text("You're on cellular data. Download anyway?")
+            }
+            .sheet(item: $selectedEpisode) { episode in
+                EpisodeDetailView(episode: episode)
             }
         }
     }
@@ -149,95 +204,91 @@ private struct StarredEpisodeRow: View {
     }
 
     var body: some View {
-        NavigationLink {
-            EpisodeDetailView(episode: episode)
-        } label: {
-            HStack(spacing: 12) {
-                CachedAsyncImage(url: URL(string: episode.podcast?.artworkURL ?? "")) { image in
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.secondary.opacity(0.2))
-                }
-                .frame(width: 50, height: 50)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+        HStack(spacing: 12) {
+            CachedAsyncImage(url: URL(string: episode.podcast?.artworkURL ?? "")) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.secondary.opacity(0.2))
+            }
+            .frame(width: 50, height: 50)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(episode.title)
-                        .font(.headline)
-                        .lineLimit(2)
-                        .foregroundStyle(episode.isPlayed ? .secondary : .primary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(episode.title)
+                    .font(.headline)
+                    .lineLimit(2)
+                    .foregroundStyle(episode.isPlayed ? .secondary : .primary)
 
-                    HStack(spacing: 6) {
-                        // Progress pie indicator if partially played
+                HStack(spacing: 6) {
+                    // Progress pie indicator if partially played
+                    if episode.playbackPosition > 0 && !episode.isPlayed {
+                        ProgressPieView(progress: progressValue)
+                            .frame(width: 12, height: 12)
+                    }
+
+                    if let podcast = episode.podcast {
+                        Text(podcast.title)
+                    }
+                    if let date = episode.publishedDate {
+                        Text("•")
                         if episode.playbackPosition > 0 && !episode.isPlayed {
-                            ProgressPieView(progress: progressValue)
-                                .frame(width: 12, height: 12)
-                        }
-
-                        if let podcast = episode.podcast {
-                            Text(podcast.title)
-                        }
-                        if let date = episode.publishedDate {
-                            Text("•")
-                            if episode.playbackPosition > 0 && !episode.isPlayed {
-                                Text(remainingTime)
-                                    .foregroundStyle(Color.accentColor)
-                            } else {
-                                Text(date.relativeFormatted)
-                            }
+                            Text(remainingTime)
+                                .foregroundStyle(Color.accentColor)
+                        } else {
+                            Text(date.relativeFormatted)
                         }
                     }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
 
-                Spacer()
+            Spacer()
 
-                // Action buttons
-                HStack(spacing: 12) {
-                    // Star button (always filled since we're in starred view)
+            // Action buttons
+            HStack(spacing: 12) {
+                // Star button (always filled since we're in starred view)
+                Button {
+                    episode.isStarred.toggle()
+                } label: {
+                    Image(systemName: "star.fill")
+                        .font(.title2)
+                        .foregroundStyle(.yellow)
+                }
+                .buttonStyle(.plain)
+
+                // Download button
+                if episode.localFilePath != nil {
                     Button {
-                        episode.isStarred.toggle()
+                        DownloadManager.shared.deleteDownload(episode)
                     } label: {
-                        Image(systemName: "star.fill")
+                        Image(systemName: "arrow.down.circle.fill")
                             .font(.title2)
-                            .foregroundStyle(.yellow)
+                            .foregroundStyle(.green)
                     }
                     .buttonStyle(.plain)
-
-                    // Download button
-                    if episode.localFilePath != nil {
-                        Button {
-                            DownloadManager.shared.deleteDownload(episode)
-                        } label: {
-                            Image(systemName: "arrow.down.circle.fill")
-                                .font(.title2)
-                                .foregroundStyle(.green)
-                        }
-                        .buttonStyle(.plain)
-                    } else if let progress = episode.downloadProgress {
-                        Button {
-                            DownloadManager.shared.cancelDownload(episode)
-                        } label: {
-                            CircularProgressView(progress: progress)
-                                .frame(width: 22, height: 22)
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        Button {
-                            DownloadManager.shared.download(episode)
-                        } label: {
-                            Image(systemName: "arrow.down.circle")
-                                .font(.title2)
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
+                } else if let progress = episode.downloadProgress {
+                    Button {
+                        DownloadManager.shared.cancelDownload(episode)
+                    } label: {
+                        CircularProgressView(progress: progress)
+                            .frame(width: 22, height: 22)
                     }
+                    .buttonStyle(.plain)
+                } else {
+                    Button {
+                        DownloadManager.shared.download(episode)
+                    } label: {
+                        Image(systemName: "arrow.down.circle")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            .opacity(episode.isPlayed ? 0.7 : 1.0)
         }
+        .opacity(episode.isPlayed ? 0.7 : 1.0)
     }
 }
 

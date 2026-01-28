@@ -25,11 +25,6 @@ struct LibraryView: View {
                     )
                 } else {
                     List {
-                        // Refresh status banner
-                        RefreshStatusBanner()
-                            .listRowInsets(EdgeInsets())
-                            .listRowSeparator(.hidden)
-
                         // Virtual folders section (only when user has folders)
                         if !folders.isEmpty {
                             Section {

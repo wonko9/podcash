@@ -12,186 +12,202 @@ struct EpisodeDetailView: View {
     private var networkMonitor: NetworkMonitor { NetworkMonitor.shared }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                // Artwork
-                CachedAsyncImage(url: URL(string: episode.displayArtworkURL ?? "")) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.secondary.opacity(0.2))
-                        .overlay {
-                            Image(systemName: "mic")
-                                .font(.largeTitle)
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 20) {
+                    // Drag indicator
+                    Capsule()
+                        .fill(Color.secondary.opacity(0.5))
+                        .frame(width: 36, height: 5)
+                        .padding(.top, 8)
+
+                    // Artwork
+                    CachedAsyncImage(url: URL(string: episode.displayArtworkURL ?? "")) { image in
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.secondary.opacity(0.2))
+                            .overlay {
+                                Image(systemName: "mic")
+                                    .font(.largeTitle)
+                                    .foregroundStyle(.secondary)
+                            }
+                    }
+                    .frame(width: 200, height: 200)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(radius: 8)
+
+                    // Title and metadata
+                    VStack(spacing: 8) {
+                        Text(episode.title)
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .multilineTextAlignment(.center)
+
+                        if let podcast = episode.podcast {
+                            Text(podcast.title)
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
+
+                        // Metadata row
+                        HStack(spacing: 16) {
+                            if let date = episode.publishedDate {
+                                Label(date.relativeFormatted, systemImage: "calendar")
+                            }
+
+                            if let duration = episode.duration {
+                                Label(duration.formattedDuration, systemImage: "clock")
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        // Progress indicator if partially played
+                        if episode.playbackPosition > 0 && !episode.isPlayed {
+                            VStack(spacing: 4) {
+                                ProgressView(value: progressValue)
+                                    .tint(.accentColor)
+
+                                Text(remainingTimeText)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 40)
+                            .padding(.top, 4)
+                        }
+                    }
+                    .padding(.horizontal)
+
+                    // Play button
+                    Button {
+                        playEpisode()
+                    } label: {
+                        HStack {
+                            Image(systemName: episode.playbackPosition > 0 ? "play.fill" : "play.fill")
+                            Text(episode.playbackPosition > 0 ? "Continue Playing" : "Play Episode")
+                        }
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(canPlay ? Color.accentColor : Color.secondary)
+                        .foregroundStyle(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .disabled(!canPlay)
+                    .padding(.horizontal)
+
+                    // Action buttons row
+                    HStack(spacing: 32) {
+                        // Star
+                        Button {
+                            toggleStar()
+                        } label: {
+                            VStack(spacing: 4) {
+                                Image(systemName: episode.isStarred ? "star.fill" : "star")
+                                    .font(.title2)
+                                    .foregroundStyle(episode.isStarred ? .yellow : .secondary)
+                                Text(episode.isStarred ? "Starred" : "Star")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+
+                        // Download
+                        downloadButton
+
+                        // Queue
+                        Button {
+                            QueueManager.shared.addToQueue(episode)
+                        } label: {
+                            VStack(spacing: 4) {
+                                Image(systemName: "text.badge.plus")
+                                    .font(.title2)
+                                    .foregroundStyle(.secondary)
+                                Text("Queue")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+
+                        // Play Next
+                        Button {
+                            QueueManager.shared.playNext(episode)
+                        } label: {
+                            VStack(spacing: 4) {
+                                Image(systemName: "text.line.first.and.arrowtriangle.forward")
+                                    .font(.title2)
+                                    .foregroundStyle(.secondary)
+                                Text("Next")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal)
+
+                    Divider()
+                        .padding(.horizontal)
+
+                    // Description
+                    if let description = episode.episodeDescription, !description.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Description")
+                                .font(.headline)
+
+                            Text(attributedDescription(from: description))
+                                .font(.body)
+                                .foregroundStyle(.primary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                    }
+
+                    Spacer(minLength: 100)
                 }
-                .frame(width: 200, height: 200)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .shadow(radius: 8)
-
-                // Title and metadata
-                VStack(spacing: 8) {
-                    Text(episode.title)
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .multilineTextAlignment(.center)
-
-                    if let podcast = episode.podcast {
-                        Text(podcast.title)
-                            .font(.subheadline)
+            }
+            .navigationTitle("Episode")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.secondary)
                     }
-
-                    // Metadata row
-                    HStack(spacing: 16) {
-                        if let date = episode.publishedDate {
-                            Label(date.relativeFormatted, systemImage: "calendar")
-                        }
-
-                        if let duration = episode.duration {
-                            Label(duration.formattedDuration, systemImage: "clock")
-                        }
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                    // Progress indicator if partially played
-                    if episode.playbackPosition > 0 && !episode.isPlayed {
-                        VStack(spacing: 4) {
-                            ProgressView(value: progressValue)
-                                .tint(.accentColor)
-
-                            Text(remainingTimeText)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.horizontal, 40)
-                        .padding(.top, 4)
-                    }
-                }
-                .padding(.horizontal)
-
-                // Play button
-                Button {
-                    playEpisode()
-                } label: {
-                    HStack {
-                        Image(systemName: episode.playbackPosition > 0 ? "play.fill" : "play.fill")
-                        Text(episode.playbackPosition > 0 ? "Continue Playing" : "Play Episode")
-                    }
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(canPlay ? Color.accentColor : Color.secondary)
-                    .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                .disabled(!canPlay)
-                .padding(.horizontal)
-
-                // Action buttons row
-                HStack(spacing: 32) {
-                    // Star
-                    Button {
-                        episode.isStarred.toggle()
-                        if episode.isStarred && episode.localFilePath == nil {
-                            attemptDownload(isAutoDownload: true)
-                        }
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: episode.isStarred ? "star.fill" : "star")
-                                .font(.title2)
-                                .foregroundStyle(episode.isStarred ? .yellow : .secondary)
-                            Text(episode.isStarred ? "Starred" : "Star")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-
-                    // Download
-                    downloadButton
-
-                    // Queue
-                    Button {
-                        QueueManager.shared.addToQueue(episode)
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: "text.badge.plus")
-                                .font(.title2)
-                                .foregroundStyle(.secondary)
-                            Text("Queue")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-
-                    // Play Next
-                    Button {
-                        QueueManager.shared.playNext(episode)
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: "text.line.first.and.arrowtriangle.forward")
-                                .font(.title2)
-                                .foregroundStyle(.secondary)
-                            Text("Next")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal)
-
-                Divider()
-                    .padding(.horizontal)
-
-                // Description
-                if let description = episode.episodeDescription, !description.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Description")
-                            .font(.headline)
-
-                        Text(attributedDescription(from: description))
-                            .font(.body)
-                            .foregroundStyle(.primary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal)
                 }
 
-                Spacer(minLength: 100)
-            }
-            .padding(.top)
-        }
-        .navigationTitle("Episode")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button {
-                        episode.isPlayed.toggle()
-                    } label: {
-                        Label(
-                            episode.isPlayed ? "Mark Unplayed" : "Mark Played",
-                            systemImage: episode.isPlayed ? "circle" : "checkmark.circle"
-                        )
-                    }
-
-                    if let podcast = episode.podcast, podcast.canShare {
-                        ShareLink(item: podcast.shareURL) {
-                            Label("Share", systemImage: "square.and.arrow.up")
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Button {
+                            episode.isPlayed.toggle()
+                        } label: {
+                            Label(
+                                episode.isPlayed ? "Mark Unplayed" : "Mark Played",
+                                systemImage: episode.isPlayed ? "circle" : "checkmark.circle"
+                            )
                         }
+
+                        if let podcast = episode.podcast, podcast.canShare {
+                            ShareLink(item: podcast.shareURL) {
+                                Label("Share", systemImage: "square.and.arrow.up")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
                 }
             }
         }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.hidden) // We have our own
+        .interactiveDismissDisabled(false)
         .alert("Download on Cellular?", isPresented: $showCellularConfirmation) {
             Button("Download") {
                 DownloadManager.shared.download(episode)
@@ -275,6 +291,14 @@ struct EpisodeDetailView: View {
             DownloadManager.shared.download(episode)
         }
         AudioPlayerManager.shared.play(episode)
+        dismiss()
+    }
+
+    private func toggleStar() {
+        episode.isStarred.toggle()
+        if episode.isStarred && episode.localFilePath == nil {
+            attemptDownload(isAutoDownload: true)
+        }
     }
 
     private func attemptDownload(isAutoDownload: Bool) {
@@ -316,7 +340,5 @@ struct EpisodeDetailView: View {
         duration: 3600,
         publishedDate: Date()
     )
-    return NavigationStack {
-        EpisodeDetailView(episode: episode)
-    }
+    return EpisodeDetailView(episode: episode)
 }

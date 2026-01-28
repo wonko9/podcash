@@ -21,7 +21,9 @@ struct FolderDetailView: View {
     @State private var podcastForNewFolder: Podcast?
     @State private var showCellularConfirmation = false
     @State private var episodePendingDownload: Episode?
+    @State private var selectedEpisode: Episode?
     @State private var podcastToUnsubscribe: Podcast?
+    @State private var displayLimit = 100  // Start with 100, load more on scroll
 
     private var refreshManager: RefreshManager { RefreshManager.shared }
 
@@ -54,11 +56,6 @@ struct FolderDetailView: View {
                 )
             } else {
                 List {
-                    // Refresh status banner
-                    RefreshStatusBanner()
-                        .listRowInsets(EdgeInsets())
-                        .listRowSeparator(.hidden)
-
                     // View mode picker
                     Section {
                         Picker("View", selection: $viewMode) {
@@ -151,6 +148,9 @@ struct FolderDetailView: View {
                 showDownloadedOnly = true
             }
         }
+        .onChange(of: sortNewestFirst) { _, _ in displayLimit = 100 }
+        .onChange(of: showStarredOnly) { _, _ in displayLimit = 100 }
+        .onChange(of: showDownloadedOnly) { _, _ in displayLimit = 100 }
         .alert("Download on Cellular?", isPresented: $showCellularConfirmation) {
             Button("Download") {
                 if let episode = episodePendingDownload {
@@ -163,6 +163,9 @@ struct FolderDetailView: View {
             }
         } message: {
             Text("You're on cellular data. Download anyway?")
+        }
+        .sheet(item: $selectedEpisode) { episode in
+            EpisodeDetailView(episode: episode)
         }
         .confirmationDialog(
             "Unsubscribe from \(podcastToUnsubscribe?.title ?? "podcast")?",
@@ -280,7 +283,7 @@ struct FolderDetailView: View {
                     description: Text(emptyStateDescription)
                 )
             } else {
-                ForEach(filteredEpisodes, id: \.episode.guid) { item in
+                ForEach(Array(filteredEpisodes.enumerated()), id: \.element.episode.guid) { index, item in
                     FolderEpisodeRow(
                         episode: item.episode,
                         podcast: item.podcast,
@@ -289,6 +292,16 @@ struct FolderDetailView: View {
                             showCellularConfirmation = true
                         }
                     )
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            selectedEpisode = item.episode
+                        }
+                        .onAppear {
+                            // Load more when approaching the end
+                            if index >= filteredEpisodes.count - 10 && hasMoreEpisodes {
+                                loadMoreEpisodes()
+                            }
+                        }
                         .contextMenu {
                             EpisodeContextMenu(
                                 episode: item.episode,
@@ -337,15 +350,35 @@ struct FolderDetailView: View {
                             .tint(.blue)
                         }
                 }
+
+                // Loading indicator at bottom
+                if hasMoreEpisodes {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                            .onAppear {
+                                loadMoreEpisodes()
+                            }
+                        Spacer()
+                    }
+                    .listRowBackground(Color.clear)
+                }
             }
         } header: {
-            Text("\(filteredEpisodes.count) Episodes")
+            if hasMoreEpisodes {
+                Text("Showing \(filteredEpisodes.count) of \(totalEpisodeCount) Episodes")
+            } else {
+                Text("\(totalEpisodeCount) Episodes")
+            }
         }
     }
 
     // MARK: - Filtered Episodes
 
-    private var filteredEpisodes: [(episode: Episode, podcast: Podcast)] {
+    /// How many more episodes to load when scrolling
+    private let loadMoreIncrement = 50
+
+    private var allFilteredEpisodes: [(episode: Episode, podcast: Podcast)] {
         var items = allEpisodesWithPodcast
 
         if showStarredOnly {
@@ -360,6 +393,24 @@ struct FolderDetailView: View {
             let date1 = e1.episode.publishedDate ?? .distantPast
             let date2 = e2.episode.publishedDate ?? .distantPast
             return sortNewestFirst ? date1 > date2 : date1 < date2
+        }
+    }
+
+    private var filteredEpisodes: [(episode: Episode, podcast: Podcast)] {
+        Array(allFilteredEpisodes.prefix(displayLimit))
+    }
+
+    private var totalEpisodeCount: Int {
+        allFilteredEpisodes.count
+    }
+
+    private var hasMoreEpisodes: Bool {
+        displayLimit < totalEpisodeCount
+    }
+
+    private func loadMoreEpisodes() {
+        if hasMoreEpisodes {
+            displayLimit += loadMoreIncrement
         }
     }
 
@@ -525,99 +576,95 @@ private struct FolderEpisodeRow: View {
     }
 
     var body: some View {
-        NavigationLink {
-            EpisodeDetailView(episode: episode)
-        } label: {
-            HStack(spacing: 12) {
-                CachedAsyncImage(url: URL(string: podcast.artworkURL ?? "")) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.secondary.opacity(0.2))
-                }
-                .frame(width: 50, height: 50)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+        HStack(spacing: 12) {
+            CachedAsyncImage(url: URL(string: podcast.artworkURL ?? "")) { image in
+                image
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } placeholder: {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.secondary.opacity(0.2))
+            }
+            .frame(width: 50, height: 50)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(episode.title)
-                        .font(.headline)
-                        .lineLimit(2)
-                        .foregroundStyle(episode.isPlayed ? .secondary : .primary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(episode.title)
+                    .font(.headline)
+                    .lineLimit(2)
+                    .foregroundStyle(episode.isPlayed ? .secondary : .primary)
 
-                    HStack(spacing: 6) {
-                        // Progress pie indicator if partially played
+                HStack(spacing: 6) {
+                    // Progress pie indicator if partially played
+                    if episode.playbackPosition > 0 && !episode.isPlayed {
+                        ProgressPieView(progress: progressValue)
+                            .frame(width: 12, height: 12)
+                    }
+
+                    Text(podcast.title)
+                        .lineLimit(1)
+                    if let date = episode.publishedDate {
+                        Text("•")
                         if episode.playbackPosition > 0 && !episode.isPlayed {
-                            ProgressPieView(progress: progressValue)
-                                .frame(width: 12, height: 12)
-                        }
-
-                        Text(podcast.title)
-                            .lineLimit(1)
-                        if let date = episode.publishedDate {
-                            Text("•")
-                            if episode.playbackPosition > 0 && !episode.isPlayed {
-                                Text(remainingTime)
-                                    .foregroundStyle(Color.accentColor)
-                            } else {
-                                Text(date.relativeFormatted)
-                            }
+                            Text(remainingTime)
+                                .foregroundStyle(Color.accentColor)
+                        } else {
+                            Text(date.relativeFormatted)
                         }
                     }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
 
-                Spacer()
+            Spacer()
 
-                // Action buttons
-                HStack(spacing: 12) {
-                    // Star button
+            // Action buttons
+            HStack(spacing: 12) {
+                // Star button
+                Button {
+                    episode.isStarred.toggle()
+                    if episode.isStarred && episode.localFilePath == nil {
+                        attemptDownload(isAutoDownload: true)
+                    }
+                } label: {
+                    Image(systemName: episode.isStarred ? "star.fill" : "star")
+                        .font(.title2)
+                        .foregroundStyle(episode.isStarred ? .yellow : .secondary)
+                }
+                .buttonStyle(.plain)
+
+                // Download button
+                if episode.localFilePath != nil {
                     Button {
-                        episode.isStarred.toggle()
-                        if episode.isStarred && episode.localFilePath == nil {
-                            attemptDownload(isAutoDownload: true)
-                        }
+                        DownloadManager.shared.deleteDownload(episode)
                     } label: {
-                        Image(systemName: episode.isStarred ? "star.fill" : "star")
+                        Image(systemName: "arrow.down.circle.fill")
                             .font(.title2)
-                            .foregroundStyle(episode.isStarred ? .yellow : .secondary)
+                            .foregroundStyle(.green)
                     }
                     .buttonStyle(.plain)
-
-                    // Download button
-                    if episode.localFilePath != nil {
-                        Button {
-                            DownloadManager.shared.deleteDownload(episode)
-                        } label: {
-                            Image(systemName: "arrow.down.circle.fill")
-                                .font(.title2)
-                                .foregroundStyle(.green)
-                        }
-                        .buttonStyle(.plain)
-                    } else if let progress = episode.downloadProgress {
-                        Button {
-                            DownloadManager.shared.cancelDownload(episode)
-                        } label: {
-                            CircularProgressView(progress: progress)
-                                .frame(width: 22, height: 22)
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        Button {
-                            attemptDownload(isAutoDownload: false)
-                        } label: {
-                            Image(systemName: "arrow.down.circle")
-                                .font(.title2)
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
+                } else if let progress = episode.downloadProgress {
+                    Button {
+                        DownloadManager.shared.cancelDownload(episode)
+                    } label: {
+                        CircularProgressView(progress: progress)
+                            .frame(width: 22, height: 22)
                     }
+                    .buttonStyle(.plain)
+                } else {
+                    Button {
+                        attemptDownload(isAutoDownload: false)
+                    } label: {
+                        Image(systemName: "arrow.down.circle")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            .opacity(episode.isPlayed ? 0.7 : 1.0)
         }
+        .opacity(episode.isPlayed ? 0.7 : 1.0)
     }
 
     private func attemptDownload(isAutoDownload: Bool) {

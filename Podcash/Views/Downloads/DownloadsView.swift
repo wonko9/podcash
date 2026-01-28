@@ -10,11 +10,34 @@ struct DownloadsView: View {
     @State private var showDeleteAllConfirmation = false
     @State private var showCellularConfirmation = false
     @State private var episodePendingDownload: Episode?
+    @State private var selectedEpisode: Episode?
+    @State private var displayLimit = 100  // Start with 100, load more on scroll
 
-    private var downloadedEpisodes: [Episode] {
+    /// How many more episodes to load when scrolling
+    private let loadMoreIncrement = 50
+
+    private var allDownloadedEpisodes: [Episode] {
         allEpisodes
             .filter { $0.localFilePath != nil }
             .sorted { ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast) }
+    }
+
+    private var downloadedEpisodes: [Episode] {
+        Array(allDownloadedEpisodes.prefix(displayLimit))
+    }
+
+    private var totalDownloadedCount: Int {
+        allDownloadedEpisodes.count
+    }
+
+    private var hasMoreDownloads: Bool {
+        displayLimit < totalDownloadedCount
+    }
+
+    private func loadMoreDownloads() {
+        if hasMoreDownloads {
+            displayLimit += loadMoreIncrement
+        }
     }
 
     private var downloadingEpisodes: [Episode] {
@@ -59,9 +82,19 @@ struct DownloadsView: View {
                         }
 
                         // Downloaded episodes
-                        Section("Downloaded (\(formattedTotalSize))") {
-                            ForEach(downloadedEpisodes) { episode in
+                        Section {
+                            ForEach(Array(downloadedEpisodes.enumerated()), id: \.element.guid) { index, episode in
                                 DownloadedEpisodeRow(episode: episode)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        selectedEpisode = episode
+                                    }
+                                    .onAppear {
+                                        // Load more when approaching the end
+                                        if index >= downloadedEpisodes.count - 10 && hasMoreDownloads {
+                                            loadMoreDownloads()
+                                        }
+                                    }
                                     .contextMenu {
                                         EpisodeContextMenu(
                                             episode: episode,
@@ -78,6 +111,25 @@ struct DownloadsView: View {
                                             Label("Delete", systemImage: "trash")
                                         }
                                     }
+                            }
+
+                            // Loading indicator at bottom
+                            if hasMoreDownloads {
+                                HStack {
+                                    Spacer()
+                                    ProgressView()
+                                        .onAppear {
+                                            loadMoreDownloads()
+                                        }
+                                    Spacer()
+                                }
+                                .listRowBackground(Color.clear)
+                            }
+                        } header: {
+                            if hasMoreDownloads {
+                                Text("Showing \(downloadedEpisodes.count) of \(totalDownloadedCount) Downloaded (\(formattedTotalSize))")
+                            } else {
+                                Text("Downloaded (\(formattedTotalSize))")
                             }
                         }
                     }
@@ -124,6 +176,9 @@ struct DownloadsView: View {
             } message: {
                 Text("You're on cellular data. Download anyway?")
             }
+            .sheet(item: $selectedEpisode) { episode in
+                EpisodeDetailView(episode: episode)
+            }
         }
     }
 
@@ -150,56 +205,52 @@ private struct DownloadedEpisodeRow: View {
     }
 
     var body: some View {
-        NavigationLink {
-            EpisodeDetailView(episode: episode)
-        } label: {
-            HStack(spacing: 12) {
-                CachedAsyncImage(url: URL(string: episode.podcast?.artworkURL ?? "")) { image in
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.secondary.opacity(0.2))
-                }
-                .frame(width: 50, height: 50)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+        HStack(spacing: 12) {
+            CachedAsyncImage(url: URL(string: episode.podcast?.artworkURL ?? "")) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.secondary.opacity(0.2))
+            }
+            .frame(width: 50, height: 50)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(episode.title)
-                        .font(.headline)
-                        .lineLimit(2)
-                        .foregroundStyle(episode.isPlayed ? .secondary : .primary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(episode.title)
+                    .font(.headline)
+                    .lineLimit(2)
+                    .foregroundStyle(episode.isPlayed ? .secondary : .primary)
 
-                    HStack(spacing: 6) {
-                        // Progress pie indicator if partially played
+                HStack(spacing: 6) {
+                    // Progress pie indicator if partially played
+                    if episode.playbackPosition > 0 && !episode.isPlayed {
+                        ProgressPieView(progress: progressValue)
+                            .frame(width: 12, height: 12)
+                    }
+
+                    if let podcast = episode.podcast {
+                        Text(podcast.title)
+                    }
+                    if let duration = episode.duration {
+                        Text("•")
                         if episode.playbackPosition > 0 && !episode.isPlayed {
-                            ProgressPieView(progress: progressValue)
-                                .frame(width: 12, height: 12)
-                        }
-
-                        if let podcast = episode.podcast {
-                            Text(podcast.title)
-                        }
-                        if let duration = episode.duration {
-                            Text("•")
-                            if episode.playbackPosition > 0 && !episode.isPlayed {
-                                Text(remainingTime)
-                                    .foregroundStyle(Color.accentColor)
-                            } else {
-                                Text(duration.formattedDuration)
-                            }
+                            Text(remainingTime)
+                                .foregroundStyle(Color.accentColor)
+                        } else {
+                            Text(duration.formattedDuration)
                         }
                     }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 }
-
-                Spacer()
-
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
-            .opacity(episode.isPlayed ? 0.7 : 1.0)
+
+            Spacer()
+
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
         }
+        .opacity(episode.isPlayed ? 0.7 : 1.0)
     }
 }
 

@@ -47,16 +47,20 @@ struct PodcashApp: App {
                 .task {
                     let context = sharedModelContainer.mainContext
 
+                    // Brief delay to ensure UI is ready to show refresh banner
+                    try? await Task.sleep(for: .milliseconds(500))
+
                     // Sync on app launch if iCloud is available
                     if SyncService.shared.isCloudAvailable {
                         await SyncService.shared.syncNow(context: context)
                     }
 
                     // Background refresh if stale (> 1 hour since last refresh)
+                    // Use RefreshManager so the status banner shows
                     let settings = AppSettings.getOrCreate(context: context)
                     let staleThreshold = Date().addingTimeInterval(-3600) // 1 hour
                     if settings.lastGlobalRefresh ?? .distantPast < staleThreshold {
-                        _ = await FeedService.shared.refreshAllPodcasts(context: context)
+                        RefreshManager.shared.refreshAllPodcasts(context: context)
                         settings.lastGlobalRefresh = Date()
                         try? context.save()
                     }
