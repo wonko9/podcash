@@ -174,6 +174,8 @@ final class FeedService {
             logger.info("[\(podcast.title)] No new episodes")
         } else {
             logger.info("[\(podcast.title)] Added \(addedCount) new episode(s)")
+            // Save immediately so @Query observers update in real-time
+            try? context.save()
         }
 
         podcast.lastRefreshed = Date()
@@ -226,7 +228,7 @@ final class FeedService {
 
             let guid = item.guid?.value ?? audioURL
 
-            return Episode(
+            let episode = Episode(
                 guid: guid,
                 title: item.title ?? "Untitled Episode",
                 audioURL: audioURL,
@@ -235,6 +237,11 @@ final class FeedService {
                 publishedDate: item.pubDate,
                 artworkURL: item.iTunes?.iTunesImage?.attributes?.href
             )
+            
+            // Extract episode link for sharing
+            episode.episodeLink = item.link
+            
+            return episode
         }
 
         return (podcast, episodes)
@@ -256,13 +263,20 @@ final class FeedService {
                 return nil
             }
 
-            return Episode(
+            let episode = Episode(
                 guid: entry.id ?? audioURL,
                 title: entry.title ?? "Untitled Episode",
                 audioURL: audioURL,
                 episodeDescription: entry.summary?.value ?? entry.content?.value,
                 publishedDate: entry.published ?? entry.updated
             )
+            
+            // Extract episode link for sharing (first non-audio link)
+            episode.episodeLink = entry.links?.first(where: {
+                $0.attributes?.type?.contains("audio") != true
+            })?.attributes?.href
+            
+            return episode
         }
 
         return (podcast, episodes)
@@ -284,7 +298,7 @@ final class FeedService {
                 return nil
             }
 
-            return Episode(
+            let episode = Episode(
                 guid: item.id ?? audioURL,
                 title: item.title ?? "Untitled Episode",
                 audioURL: audioURL,
@@ -292,6 +306,11 @@ final class FeedService {
                 duration: item.attachments?.first?.durationInSeconds.map { TimeInterval($0) },
                 publishedDate: item.datePublished
             )
+            
+            // Extract episode link for sharing
+            episode.episodeLink = item.url
+            
+            return episode
         }
 
         return (podcast, episodes)

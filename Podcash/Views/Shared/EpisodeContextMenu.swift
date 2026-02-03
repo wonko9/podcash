@@ -26,9 +26,17 @@ struct EpisodeContextMenu: View {
         }
 
         Button {
-            QueueManager.shared.addToQueue(episode)
+            if QueueManager.shared.isInQueue(episode) {
+                QueueManager.shared.removeFromQueue(episode)
+            } else {
+                QueueManager.shared.addToQueue(episode)
+            }
         } label: {
-            Label("Add to Queue", systemImage: "text.badge.plus")
+            if QueueManager.shared.isInQueue(episode) {
+                Label("Remove from Queue", systemImage: "text.badge.checkmark")
+            } else {
+                Label("Add to Queue", systemImage: "text.badge.plus")
+            }
         }
 
         Divider()
@@ -54,9 +62,9 @@ struct EpisodeContextMenu: View {
             )
         }
 
-        // Share (only if podcast can be shared)
-        if let podcast = episode.podcast, podcast.canShare {
-            ShareLink(item: podcast.shareURL) {
+        // Share (only if episode can be shared)
+        if episode.canShare {
+            ShareLink(item: episode.shareURL) {
                 Label("Share", systemImage: "square.and.arrow.up")
             }
         }
@@ -96,7 +104,12 @@ struct EpisodeContextMenu: View {
 
         // Mark played/unplayed
         Button {
-            episode.isPlayed.toggle()
+            if !episode.isPlayed &&
+               AudioPlayerManager.shared.currentEpisode?.guid == episode.guid {
+                AudioPlayerManager.shared.markPlayedAndAdvance()
+            } else {
+                episode.isPlayed.toggle()
+            }
         } label: {
             Label(
                 episode.isPlayed ? "Mark Unplayed" : "Mark Played",

@@ -3,6 +3,7 @@ import SwiftData
 
 struct FolderDetailView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.miniPlayerVisible) private var miniPlayerVisible
     @Query(sort: \Podcast.title) private var allPodcasts: [Podcast]
     @Bindable var folder: Folder
 
@@ -25,11 +26,9 @@ struct FolderDetailView: View {
     @State private var podcastToUnsubscribe: Podcast?
     @State private var displayLimit = 100  // Start with 100, load more on scroll
 
-    // Cached computations - updated only when dependencies change
+    // Cache only stable data (folder membership) - filtered episodes computed fresh for real-time updates
     @State private var cachedPodcastsInFolder: [Podcast] = []
     @State private var cachedPodcastByGuid: [String: Podcast] = [:]
-    @State private var cachedFilteredEpisodes: [Episode] = []
-    @State private var cachedEpisodeCount: Int = 0
 
     private var refreshManager: RefreshManager { RefreshManager.shared }
 
@@ -78,6 +77,7 @@ struct FolderDetailView: View {
                     }
                 }
                 .listStyle(.plain)
+                .contentMargins(.bottom, miniPlayerVisible ? 60 : 0, for: .scrollContent)
                 .refreshable {
                     // Trigger background refresh and return immediately
                     refreshManager.refreshPodcasts(cachedPodcastsInFolder, context: modelContext)
@@ -139,13 +139,13 @@ struct FolderDetailView: View {
             if !networkMonitor.isConnected {
                 showDownloadedOnly = true
             }
-            rebuildCaches()
+            rebuildPodcastCaches()
         }
-        .onChange(of: sortNewestFirst) { _, _ in displayLimit = 100; rebuildFilteredEpisodes() }
-        .onChange(of: showStarredOnly) { _, _ in displayLimit = 100; rebuildFilteredEpisodes() }
-        .onChange(of: showDownloadedOnly) { _, _ in displayLimit = 100; rebuildFilteredEpisodes() }
-        .onChange(of: folder.podcasts.count) { _, _ in rebuildCaches() }
-        .onChange(of: allPodcasts.count) { _, _ in rebuildCaches() }
+        .onChange(of: sortNewestFirst) { _, _ in displayLimit = 100 }
+        .onChange(of: showStarredOnly) { _, _ in displayLimit = 100 }
+        .onChange(of: showDownloadedOnly) { _, _ in displayLimit = 100 }
+        .onChange(of: folder.podcasts.count) { _, _ in rebuildPodcastCaches() }
+        .onChange(of: allPodcasts.count) { _, _ in rebuildPodcastCaches() }
         .alert("Download on Cellular?", isPresented: $showCellularConfirmation) {
             Button("Download") {
                 if let episode = episodePendingDownload {
@@ -278,6 +278,19 @@ struct FolderDetailView: View {
                     description: Text(emptyStateDescription)
                 )
             } else {
+                // Episode count as inline row (not sticky)
+                HStack {
+                    if hasMoreEpisodes {
+                        Text("Showing \(filteredEpisodes.count) of \(totalEpisodeCount) Episodes")
+                    } else {
+                        Text("\(totalEpisodeCount) Episodes")
+                    }
+                    Spacer()
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+
                 ForEach(Array(filteredEpisodes.enumerated()), id: \.element.episode.guid) { index, item in
                     FolderEpisodeRow(
                         episode: item.episode,
@@ -331,9 +344,16 @@ struct FolderDetailView: View {
                         }
                         .swipeActions(edge: .trailing) {
                             Button {
-                                QueueManager.shared.addToQueue(item.episode)
+                                if QueueManager.shared.isInQueue(item.episode) {
+                                    QueueManager.shared.removeFromQueue(item.episode)
+                                } else {
+                                    QueueManager.shared.addToQueue(item.episode)
+                                }
                             } label: {
-                                Label("Queue", systemImage: "text.badge.plus")
+                                Label(
+                                    QueueManager.shared.isInQueue(item.episode) ? "Dequeue" : "Queue",
+                                    systemImage: QueueManager.shared.isInQueue(item.episode) ? "text.badge.checkmark" : "text.badge.plus"
+                                )
                             }
                             .tint(.indigo)
 
@@ -359,63 +379,16 @@ struct FolderDetailView: View {
                     .listRowBackground(Color.clear)
                 }
             }
-        } header: {
-            if hasMoreEpisodes {
-                Text("Showing \(filteredEpisodes.count) of \(totalEpisodeCount) Episodes")
-            } else {
-                Text("\(totalEpisodeCount) Episodes")
-            }
         }
     }
 
-    // MARK: - Filtered Episodes
+    // MARK: - Filtered Episodes (computed fresh for real-time updates)
 
     /// How many more episodes to load when scrolling
     private let loadMoreIncrement = 50
 
-    /// Only create tuples for episodes we're actually displaying
-    private var filteredEpisodes: [(episode: Episode, podcast: Podcast)] {
-        cachedFilteredEpisodes.prefix(displayLimit).compactMap { episode in
-            guard let podcast = cachedPodcastByGuid[episode.guid] else { return nil }
-            return (episode: episode, podcast: podcast)
-        }
-    }
-
-    private var totalEpisodeCount: Int {
-        cachedEpisodeCount
-    }
-
-    private var hasMoreEpisodes: Bool {
-        displayLimit < totalEpisodeCount
-    }
-
-    private func loadMoreEpisodes() {
-        if hasMoreEpisodes {
-            displayLimit += loadMoreIncrement
-        }
-    }
-
-    // MARK: - Cache Management
-
-    private func rebuildCaches() {
-        // Rebuild podcasts in folder
-        cachedPodcastsInFolder = allPodcasts.filter { podcast in
-            folder.podcasts.contains { $0.feedURL == podcast.feedURL }
-        }
-
-        // Rebuild podcast lookup dictionary
-        var dict: [String: Podcast] = [:]
-        for podcast in cachedPodcastsInFolder {
-            for episode in podcast.episodes {
-                dict[episode.guid] = podcast
-            }
-        }
-        cachedPodcastByGuid = dict
-
-        rebuildFilteredEpisodes()
-    }
-
-    private func rebuildFilteredEpisodes() {
+    /// Base filtered episodes - computed fresh so changes are reflected immediately
+    private var baseFilteredEpisodes: [Episode] {
         // Get all episodes from cached podcasts
         var episodes = cachedPodcastsInFolder.flatMap { $0.episodes }
 
@@ -434,8 +407,47 @@ struct FolderDetailView: View {
             return sortNewestFirst ? date1 > date2 : date1 < date2
         }
 
-        cachedFilteredEpisodes = episodes
-        cachedEpisodeCount = episodes.count
+        return episodes
+    }
+
+    /// Only create tuples for episodes we're actually displaying
+    private var filteredEpisodes: [(episode: Episode, podcast: Podcast)] {
+        baseFilteredEpisodes.prefix(displayLimit).compactMap { episode in
+            guard let podcast = cachedPodcastByGuid[episode.guid] else { return nil }
+            return (episode: episode, podcast: podcast)
+        }
+    }
+
+    private var totalEpisodeCount: Int {
+        baseFilteredEpisodes.count
+    }
+
+    private var hasMoreEpisodes: Bool {
+        displayLimit < totalEpisodeCount
+    }
+
+    private func loadMoreEpisodes() {
+        if hasMoreEpisodes {
+            displayLimit += loadMoreIncrement
+        }
+    }
+
+    // MARK: - Cache Management
+
+    private func rebuildPodcastCaches() {
+        // Rebuild podcasts in folder
+        cachedPodcastsInFolder = allPodcasts.filter { podcast in
+            folder.podcasts.contains { $0.feedURL == podcast.feedURL }
+        }
+
+        // Rebuild podcast lookup dictionary
+        var dict: [String: Podcast] = [:]
+        for podcast in cachedPodcastsInFolder {
+            for episode in podcast.episodes {
+                dict[episode.guid] = podcast
+            }
+        }
+        cachedPodcastByGuid = dict
     }
 
     // MARK: - Empty State
@@ -588,6 +600,12 @@ private struct FolderEpisodeRow: View {
     let podcast: Podcast  // Explicitly passed to avoid relationship issues
     var onDownloadNeedsConfirmation: ((Episode) -> Void)?
 
+    @State private var showDeleteDownloadConfirmation = false
+
+    private var isCurrentlyPlaying: Bool {
+        AudioPlayerManager.shared.currentEpisode?.guid == episode.guid
+    }
+
     private var progressValue: Double {
         guard let duration = episode.duration, duration > 0 else { return 0 }
         return episode.playbackPosition / duration
@@ -614,9 +632,15 @@ private struct FolderEpisodeRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(episode.title)
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
                     .lineLimit(2)
+                    .minimumScaleFactor(0.9)
                     .foregroundStyle(episode.isPlayed ? .secondary : .primary)
+
+                Text(podcast.title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
 
                 HStack(spacing: 6) {
                     // Progress pie indicator if partially played
@@ -625,16 +649,19 @@ private struct FolderEpisodeRow: View {
                             .frame(width: 12, height: 12)
                     }
 
-                    Text(podcast.title)
-                        .lineLimit(1)
                     if let date = episode.publishedDate {
-                        Text("•")
                         if episode.playbackPosition > 0 && !episode.isPlayed {
                             Text(remainingTime)
                                 .foregroundStyle(Color.accentColor)
                         } else {
                             Text(date.relativeFormatted)
                         }
+                    }
+
+                    if !(episode.playbackPosition > 0 && !episode.isPlayed),
+                       let duration = episode.duration {
+                        Text("\u{2022}")
+                        Text(duration.formattedDuration)
                     }
                 }
                 .font(.caption)
@@ -644,7 +671,7 @@ private struct FolderEpisodeRow: View {
             Spacer()
 
             // Action buttons
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 // Star button
                 Button {
                     episode.isStarred.toggle()
@@ -655,27 +682,44 @@ private struct FolderEpisodeRow: View {
                     Image(systemName: episode.isStarred ? "star.fill" : "star")
                         .font(.title2)
                         .foregroundStyle(episode.isStarred ? .yellow : .secondary)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
 
-                // Download button
-                if episode.localFilePath != nil {
+                // Playing indicator or download button
+                if isCurrentlyPlaying {
                     Button {
-                        DownloadManager.shared.deleteDownload(episode)
+                        AudioPlayerManager.shared.togglePlayPause()
+                    } label: {
+                        Image(systemName: AudioPlayerManager.shared.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                } else if episode.localFilePath != nil {
+                    Button {
+                        showDeleteDownloadConfirmation = true
                     } label: {
                         Image(systemName: "arrow.down.circle.fill")
                             .font(.title2)
                             .foregroundStyle(.green)
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
                 } else if let progress = episode.downloadProgress {
                     Button {
                         DownloadManager.shared.cancelDownload(episode)
                     } label: {
                         CircularProgressView(progress: progress)
                             .frame(width: 22, height: 22)
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
                 } else {
                     Button {
                         attemptDownload(isAutoDownload: false)
@@ -683,12 +727,22 @@ private struct FolderEpisodeRow: View {
                         Image(systemName: "arrow.down.circle")
                             .font(.title2)
                             .foregroundStyle(.secondary)
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
                 }
             }
         }
         .opacity(episode.isPlayed ? 0.7 : 1.0)
+        .alert("Delete Download?", isPresented: $showDeleteDownloadConfirmation) {
+            Button("Delete", role: .destructive) {
+                DownloadManager.shared.deleteDownload(episode)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The downloaded file will be removed from your device.")
+        }
     }
 
     private func attemptDownload(isAutoDownload: Bool) {

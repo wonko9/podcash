@@ -3,6 +3,7 @@ import SwiftData
 
 struct DownloadsView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.miniPlayerVisible) private var miniPlayerVisible
     @Query private var allEpisodes: [Episode]
 
     private var networkMonitor: NetworkMonitor { NetworkMonitor.shared }
@@ -83,6 +84,19 @@ struct DownloadsView: View {
 
                         // Downloaded episodes
                         Section {
+                            // Episode count as inline row (not sticky)
+                            HStack {
+                                if hasMoreDownloads {
+                                    Text("Showing \(downloadedEpisodes.count) of \(totalDownloadedCount) Downloaded (\(formattedTotalSize))")
+                                } else {
+                                    Text("Downloaded (\(formattedTotalSize))")
+                                }
+                                Spacer()
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+
                             ForEach(Array(downloadedEpisodes.enumerated()), id: \.element.guid) { index, episode in
                                 DownloadedEpisodeRow(episode: episode)
                                     .contentShape(Rectangle())
@@ -125,14 +139,9 @@ struct DownloadsView: View {
                                 }
                                 .listRowBackground(Color.clear)
                             }
-                        } header: {
-                            if hasMoreDownloads {
-                                Text("Showing \(downloadedEpisodes.count) of \(totalDownloadedCount) Downloaded (\(formattedTotalSize))")
-                            } else {
-                                Text("Downloaded (\(formattedTotalSize))")
-                            }
                         }
                     }
+                    .contentMargins(.bottom, miniPlayerVisible ? 60 : 0, for: .scrollContent)
                 }
             }
             .navigationTitle("Downloads")
@@ -193,6 +202,12 @@ struct DownloadsView: View {
 private struct DownloadedEpisodeRow: View {
     let episode: Episode
 
+    @State private var showDeleteDownloadConfirmation = false
+
+    private var isCurrentlyPlaying: Bool {
+        AudioPlayerManager.shared.currentEpisode?.guid == episode.guid
+    }
+
     private var progressValue: Double {
         guard let duration = episode.duration, duration > 0 else { return 0 }
         return episode.playbackPosition / duration
@@ -217,9 +232,17 @@ private struct DownloadedEpisodeRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(episode.title)
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
                     .lineLimit(2)
+                    .minimumScaleFactor(0.9)
                     .foregroundStyle(episode.isPlayed ? .secondary : .primary)
+
+                if let podcast = episode.podcast {
+                    Text(podcast.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
 
                 HStack(spacing: 6) {
                     // Progress pie indicator if partially played
@@ -228,12 +251,7 @@ private struct DownloadedEpisodeRow: View {
                             .frame(width: 12, height: 12)
                     }
 
-                    if let podcast = episode.podcast {
-                        Text(podcast.title)
-                            .lineLimit(1)
-                    }
                     if let duration = episode.duration {
-                        Text("•")
                         if episode.playbackPosition > 0 && !episode.isPlayed {
                             Text(remainingTime)
                                 .foregroundStyle(Color.accentColor)
@@ -248,10 +266,50 @@ private struct DownloadedEpisodeRow: View {
 
             Spacer()
 
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+            if isCurrentlyPlaying {
+                Button {
+                    AudioPlayerManager.shared.togglePlayPause()
+                } label: {
+                    Image(systemName: AudioPlayerManager.shared.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+            } else if episode.isPlayed {
+                Button {
+                    showDeleteDownloadConfirmation = true
+                } label: {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+            } else {
+                Button {
+                    showDeleteDownloadConfirmation = true
+                } label: {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.green)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+            }
         }
         .opacity(episode.isPlayed ? 0.7 : 1.0)
+        .alert("Delete Download?", isPresented: $showDeleteDownloadConfirmation) {
+            Button("Delete", role: .destructive) {
+                DownloadManager.shared.deleteDownload(episode)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The downloaded file will be removed from your device.")
+        }
     }
 }
 
@@ -289,10 +347,22 @@ private struct DownloadingEpisodeRow: View {
             Spacer()
 
             Button {
+                // Cancel the download and clear progress
                 DownloadManager.shared.cancelDownload(episode)
+                // Force clear progress in case it's stuck
+                episode.downloadProgress = nil
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundStyle(.secondary)
+            }
+        }
+        .swipeActions(edge: .trailing) {
+            Button(role: .destructive) {
+                // Force clear stuck download
+                DownloadManager.shared.cancelDownload(episode)
+                episode.downloadProgress = nil
+            } label: {
+                Label("Clear", systemImage: "trash")
             }
         }
     }

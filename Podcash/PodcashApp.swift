@@ -28,6 +28,9 @@ struct PodcashApp: App {
         WindowGroup {
             ContentView()
                 .onAppear {
+                    // Initialize crash reporter (must be first)
+                    _ = CrashReporter.shared
+                    
                     // Initialize services with model context
                     let context = sharedModelContainer.mainContext
                     DownloadObserver.shared.setModelContext(context)
@@ -36,6 +39,12 @@ struct PodcashApp: App {
 
                     // Migrate old absolute paths to relative filenames
                     DownloadManager.shared.migrateLocalPaths(context: context)
+
+                    // Clean up orphaned downloads (stuck downloads from previous sessions)
+                    DownloadManager.shared.cleanupOrphanedDownloads(context: context)
+
+                    // Restore active downloads from background session
+                    DownloadManager.shared.restoreActiveDownloads(context: context)
 
                     // Register and schedule background refresh
                     BackgroundRefreshManager.shared.registerBackgroundTask()

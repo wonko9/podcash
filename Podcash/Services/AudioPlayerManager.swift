@@ -134,6 +134,12 @@ final class AudioPlayerManager {
     // MARK: - Public Methods
 
     func play(_ episode: Episode) {
+        // Validate episode has audio URL
+        guard !episode.audioURL.isEmpty else {
+            logger.error("Cannot play episode: empty audio URL")
+            return
+        }
+
         // Determine URL first (validate before changing state)
         let url: URL
         if let fileURL = episode.localFileURL {
@@ -149,6 +155,7 @@ final class AudioPlayerManager {
                     return
                 }
                 guard let remoteURL = URL(string: episode.audioURL) else {
+                    logger.error("Cannot play: invalid audio URL: \(episode.audioURL)")
                     return
                 }
                 url = remoteURL
@@ -161,6 +168,7 @@ final class AudioPlayerManager {
                 return
             }
             guard let remoteURL = URL(string: episode.audioURL) else {
+                logger.error("Cannot play: invalid audio URL: \(episode.audioURL)")
                 return
             }
             url = remoteURL
@@ -209,18 +217,32 @@ final class AudioPlayerManager {
         switch status {
         case .readyToPlay:
             isLoading = false
-            duration = item.duration.seconds.isNaN ? 0 : item.duration.seconds
+            
+            // Safely extract duration
+            let itemDuration = item.duration.seconds
+            duration = (itemDuration.isNaN || itemDuration.isInfinite) ? 0 : itemDuration
 
             // Seek to saved position
             if let episode = currentEpisode, episode.playbackPosition > 0 {
-                seek(to: episode.playbackPosition)
+                // Validate position is within bounds
+                let validPosition = min(episode.playbackPosition, max(duration - 1, 0))
+                if validPosition > 0 {
+                    seek(to: validPosition)
+                }
             }
 
             resume()
             updateNowPlayingInfo()
         case .failed:
             isLoading = false
-            logger.error("Playback failed: \(item.error?.localizedDescription ?? "unknown error")")
+            let errorMessage = item.error?.localizedDescription ?? "unknown error"
+            logger.error("Playback failed: \(errorMessage)")
+            
+            // Clear player state on failure
+            clearObservers()
+            player = nil
+            currentEpisode = nil
+            isPlaying = false
         default:
             break
         }
@@ -235,10 +257,53 @@ final class AudioPlayerManager {
             return
         }
 
+        // Re-activate audio session — some headphones need this after pause
+        activateAudioSession()
+
         player?.rate = Float(effectivePlaybackSpeed)
         isPlaying = true
         updateNowPlayingInfo()
         StatsService.shared.resumeListening()
+    }
+
+    /// Marks the current episode as played, posts completion notification,
+    /// cleans up the player, and advances to the next queue item.
+    func markPlayedAndAdvance() {
+        guard let episode = currentEpisode else { return }
+        episode.isPlayed = true
+        episode.playbackPosition = 0
+
+        // Notify for download cleanup
+        NotificationCenter.default.post(
+            name: .episodePlaybackCompleted,
+            object: nil,
+            userInfo: ["guid": episode.guid]
+        )
+
+        StatsService.shared.endCurrentSession()
+        clearObservers()
+        player?.pause()
+        player = nil
+        isPlaying = false
+        currentTime = 0
+        duration = 0
+        clearNowPlayingInfo()
+
+        // Auto-advance to next queue item
+        if let nextEpisode = QueueManager.shared.popNextEpisode() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.play(nextEpisode)
+            }
+        } else {
+            currentEpisode = nil
+            deactivateAudioSession()
+        }
+    }
+
+    /// Immediately sets the player rate for speed preview (without saving)
+    func previewSpeed(_ speed: Double) {
+        guard let player = player, isPlaying else { return }
+        player.rate = Float(speed)
     }
 
     func pause() {
@@ -258,9 +323,18 @@ final class AudioPlayerManager {
     }
 
     func seek(to time: TimeInterval) {
-        let cmTime = CMTime(seconds: time, preferredTimescale: 600)
+        // Validate time is not NaN or infinite
+        guard !time.isNaN && !time.isInfinite && time >= 0 else {
+            logger.warning("Invalid seek time: \(time)")
+            return
+        }
+        
+        // Clamp to valid range
+        let validTime = min(max(time, 0), duration)
+        
+        let cmTime = CMTime(seconds: validTime, preferredTimescale: 600)
         player?.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero)
-        currentTime = time
+        currentTime = validTime
         updateNowPlayingInfo()
     }
 
@@ -414,10 +488,19 @@ final class AudioPlayerManager {
             // Pause when headphones are unplugged
             pause()
         case .newDeviceAvailable:
-            // When AirPods reconnect, ensure audio session is active
-            // so remote commands can work
-            if currentEpisode != nil {
+            // When AirPods reconnect, pre-activate audio session and
+            // pre-load player item from local file to reduce playback delay
+            if let episode = currentEpisode {
                 activateAudioSession()
+                // Pre-load player if not already loaded
+                if player == nil || player?.currentItem == nil {
+                    if let fileURL = episode.localFileURL,
+                       FileManager.default.fileExists(atPath: fileURL.path) {
+                        let playerItem = AVPlayerItem(url: fileURL)
+                        player = AVPlayer(playerItem: playerItem)
+                        setupTimeObserver()
+                    }
+                }
                 updateNowPlayingInfo()
             }
         default:
@@ -438,7 +521,8 @@ final class AudioPlayerManager {
         timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self else { return }
             let newTime = time.seconds
-            if !newTime.isNaN {
+            // Validate time before updating
+            if !newTime.isNaN && !newTime.isInfinite && newTime >= 0 {
                 self.currentTime = newTime
             }
         }

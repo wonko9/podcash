@@ -3,6 +3,7 @@ import SwiftData
 
 struct StarredView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.miniPlayerVisible) private var miniPlayerVisible
     @Query private var allEpisodes: [Episode]
 
     private var networkMonitor: NetworkMonitor { NetworkMonitor.shared }
@@ -112,6 +113,19 @@ struct StarredView: View {
                                     description: Text("Download starred episodes to see them here")
                                 )
                             } else {
+                                // Episode count as inline row (not sticky)
+                                HStack {
+                                    if hasMoreStarred {
+                                        Text("Showing \(starredEpisodes.count) of \(totalStarredCount) Episodes")
+                                    } else {
+                                        Text("\(totalStarredCount) Episodes")
+                                    }
+                                    Spacer()
+                                }
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+
                                 ForEach(Array(starredEpisodes.enumerated()), id: \.element.guid) { index, episode in
                                     StarredEpisodeRow(episode: episode)
                                         .contentShape(Rectangle())
@@ -148,14 +162,9 @@ struct StarredView: View {
                                     .listRowBackground(Color.clear)
                                 }
                             }
-                        } header: {
-                            if hasMoreStarred {
-                                Text("Showing \(starredEpisodes.count) of \(totalStarredCount) Episodes")
-                            } else {
-                                Text("\(totalStarredCount) Episodes")
-                            }
                         }
                     }
+                    .contentMargins(.bottom, miniPlayerVisible ? 60 : 0, for: .scrollContent)
                 }
             }
             .navigationTitle("Starred")
@@ -192,6 +201,12 @@ struct StarredView: View {
 private struct StarredEpisodeRow: View {
     let episode: Episode
 
+    @State private var showDeleteDownloadConfirmation = false
+
+    private var isCurrentlyPlaying: Bool {
+        AudioPlayerManager.shared.currentEpisode?.guid == episode.guid
+    }
+
     private var progressValue: Double {
         guard let duration = episode.duration, duration > 0 else { return 0 }
         return episode.playbackPosition / duration
@@ -216,9 +231,17 @@ private struct StarredEpisodeRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(episode.title)
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
                     .lineLimit(2)
+                    .minimumScaleFactor(0.9)
                     .foregroundStyle(episode.isPlayed ? .secondary : .primary)
+
+                if let podcast = episode.podcast {
+                    Text(podcast.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
 
                 HStack(spacing: 6) {
                     // Progress pie indicator if partially played
@@ -227,18 +250,19 @@ private struct StarredEpisodeRow: View {
                             .frame(width: 12, height: 12)
                     }
 
-                    if let podcast = episode.podcast {
-                        Text(podcast.title)
-                            .lineLimit(1)
-                    }
                     if let date = episode.publishedDate {
-                        Text("•")
                         if episode.playbackPosition > 0 && !episode.isPlayed {
                             Text(remainingTime)
                                 .foregroundStyle(Color.accentColor)
                         } else {
                             Text(date.relativeFormatted)
                         }
+                    }
+
+                    if !(episode.playbackPosition > 0 && !episode.isPlayed),
+                       let duration = episode.duration {
+                        Text("\u{2022}")
+                        Text(duration.formattedDuration)
                     }
                 }
                 .font(.caption)
@@ -248,7 +272,7 @@ private struct StarredEpisodeRow: View {
             Spacer()
 
             // Action buttons
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 // Star button (always filled since we're in starred view)
                 Button {
                     episode.isStarred.toggle()
@@ -256,27 +280,44 @@ private struct StarredEpisodeRow: View {
                     Image(systemName: "star.fill")
                         .font(.title2)
                         .foregroundStyle(.yellow)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
 
-                // Download button
-                if episode.localFilePath != nil {
+                // Playing indicator or download button
+                if isCurrentlyPlaying {
                     Button {
-                        DownloadManager.shared.deleteDownload(episode)
+                        AudioPlayerManager.shared.togglePlayPause()
+                    } label: {
+                        Image(systemName: AudioPlayerManager.shared.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                } else if episode.localFilePath != nil {
+                    Button {
+                        showDeleteDownloadConfirmation = true
                     } label: {
                         Image(systemName: "arrow.down.circle.fill")
                             .font(.title2)
                             .foregroundStyle(.green)
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
                 } else if let progress = episode.downloadProgress {
                     Button {
                         DownloadManager.shared.cancelDownload(episode)
                     } label: {
                         CircularProgressView(progress: progress)
                             .frame(width: 22, height: 22)
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
                 } else {
                     Button {
                         DownloadManager.shared.download(episode)
@@ -284,12 +325,22 @@ private struct StarredEpisodeRow: View {
                         Image(systemName: "arrow.down.circle")
                             .font(.title2)
                             .foregroundStyle(.secondary)
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
                 }
             }
         }
         .opacity(episode.isPlayed ? 0.7 : 1.0)
+        .alert("Delete Download?", isPresented: $showDeleteDownloadConfirmation) {
+            Button("Delete", role: .destructive) {
+                DownloadManager.shared.deleteDownload(episode)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The downloaded file will be removed from your device.")
+        }
     }
 }
 

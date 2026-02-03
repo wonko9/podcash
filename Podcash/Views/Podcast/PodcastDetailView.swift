@@ -3,6 +3,7 @@ import SwiftData
 
 struct PodcastDetailView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.miniPlayerVisible) private var miniPlayerVisible
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \Folder.sortOrder) private var allFolders: [Folder]
     let podcast: Podcast
@@ -109,6 +110,19 @@ struct PodcastDetailView: View {
                         description: Text(emptyStateDescription)
                     )
                 } else {
+                    // Episode count as inline row (not sticky)
+                    HStack {
+                        if hasMoreEpisodes {
+                            Text("Showing \(filteredEpisodes.count) of \(totalEpisodeCount) Episodes")
+                        } else {
+                            Text("\(totalEpisodeCount) Episodes")
+                        }
+                        Spacer()
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+
                     ForEach(Array(filteredEpisodes.enumerated()), id: \.element.guid) { index, episode in
                         EpisodeRowView(episode: episode)
                             .contentShape(Rectangle())
@@ -171,15 +185,10 @@ struct PodcastDetailView: View {
                         .listRowBackground(Color.clear)
                     }
                 }
-            } header: {
-                if hasMoreEpisodes {
-                    Text("Showing \(filteredEpisodes.count) of \(totalEpisodeCount) Episodes")
-                } else {
-                    Text("\(totalEpisodeCount) Episodes")
-                }
             }
         }
         .listStyle(.plain)
+        .contentMargins(.bottom, miniPlayerVisible ? 60 : 0, for: .scrollContent)
         .navigationTitle(podcast.title)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {

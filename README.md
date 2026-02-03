@@ -5,13 +5,18 @@ A personal iOS podcast player built with SwiftUI and SwiftData.
 ## Features
 
 - **Podcast Management**: Subscribe to podcasts via RSS feed URL or search
-- **Offline Playback**: Download episodes for offline listening
+- **Offline Playback**: Download episodes for offline listening with offline mode indicator
 - **Folders**: Organize podcasts into color-coded folders
-- **Queue**: Build a queue with "Play Next" and "Add to Queue"
+- **Queue**: Build a queue with "Play Next" and "Add to Queue", queue badge on tab, toggle queue membership, inline drag reorder with minus buttons
 - **Starring**: Star episodes to save them for later
 - **Sleep Timer**: Set a timer or stop at end of episode
-- **Playback Speed**: Global speed (0.5x-3x) with per-podcast overrides
-- **Customizable Skip**: Configure skip forward/backward intervals
+- **Playback Speed**: Global speed (0.5x-3x) with per-podcast overrides, instant preview when selecting speed
+- **Customizable Skip**: Configure skip forward/backward intervals (mini player includes skip backward button)
+- **Audio Output**: Route audio to AirPods, speakers, or other devices via built-in picker
+- **Smart Playback**: "Mark as Played" auto-advances to next queued episode, headphone reconnect pre-loads audio
+- **Rich Episode Descriptions**: HTML descriptions with tappable links
+- **Now Playing Indicator**: Currently playing episode shows play/pause button across all episode lists
+- **Download Management**: Confirmation before deleting downloads, played/unplayed state indicators, throttled progress updates
 - **iCloud Sync**: Sync subscriptions, folders, and listening progress across devices (requires paid Apple Developer account)
 - **Listening Stats**: Track your listening habits
 

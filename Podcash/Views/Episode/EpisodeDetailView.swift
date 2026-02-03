@@ -8,6 +8,8 @@ struct EpisodeDetailView: View {
     let episode: Episode
 
     @State private var showCellularConfirmation = false
+    @State private var showDeleteDownloadConfirmation = false
+    @State private var parsedDescription: AttributedString?
 
     private var networkMonitor: NetworkMonitor { NetworkMonitor.shared }
 
@@ -121,15 +123,19 @@ struct EpisodeDetailView: View {
 
                         // Queue
                         Button {
-                            QueueManager.shared.addToQueue(episode)
+                            if QueueManager.shared.isInQueue(episode) {
+                                QueueManager.shared.removeFromQueue(episode)
+                            } else {
+                                QueueManager.shared.addToQueue(episode)
+                            }
                         } label: {
                             VStack(spacing: 4) {
-                                Image(systemName: "text.badge.plus")
+                                Image(systemName: QueueManager.shared.isInQueue(episode) ? "text.badge.checkmark" : "text.badge.plus")
                                     .font(.title2)
-                                    .foregroundStyle(.secondary)
-                                Text("Queue")
+                                    .foregroundStyle(QueueManager.shared.isInQueue(episode) ? .indigo : .secondary)
+                                Text(QueueManager.shared.isInQueue(episode) ? "Queued" : "Queue")
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(QueueManager.shared.isInQueue(episode) ? .indigo : .secondary)
                             }
                         }
                         .buttonStyle(.plain)
@@ -160,12 +166,23 @@ struct EpisodeDetailView: View {
                             Text("Description")
                                 .font(.headline)
 
-                            Text(attributedDescription(from: description))
-                                .font(.body)
-                                .foregroundStyle(.primary)
+                            if let parsed = parsedDescription {
+                                Text(parsed)
+                                    .font(.body)
+                                    .foregroundStyle(.primary)
+                            } else {
+                                Text(attributedDescription(from: description))
+                                    .font(.body)
+                                    .foregroundStyle(.primary)
+                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal)
+                        .task {
+                            if parsedDescription == nil {
+                                parsedDescription = parseHTML(description)
+                            }
+                        }
                     }
 
                     Spacer(minLength: 100)
@@ -194,8 +211,8 @@ struct EpisodeDetailView: View {
                             )
                         }
 
-                        if let podcast = episode.podcast, podcast.canShare {
-                            ShareLink(item: podcast.shareURL) {
+                        if episode.canShare {
+                            ShareLink(item: episode.shareURL) {
                                 Label("Share", systemImage: "square.and.arrow.up")
                             }
                         }
@@ -216,6 +233,14 @@ struct EpisodeDetailView: View {
         } message: {
             Text("You're on cellular data. Download anyway?")
         }
+        .alert("Delete Download?", isPresented: $showDeleteDownloadConfirmation) {
+            Button("Delete", role: .destructive) {
+                DownloadManager.shared.deleteDownload(episode)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The downloaded file will be removed from your device.")
+        }
     }
 
     // MARK: - Download Button
@@ -224,7 +249,7 @@ struct EpisodeDetailView: View {
     private var downloadButton: some View {
         if episode.localFilePath != nil {
             Button {
-                DownloadManager.shared.deleteDownload(episode)
+                showDeleteDownloadConfirmation = true
             } label: {
                 VStack(spacing: 4) {
                     Image(systemName: "arrow.down.circle.fill")
@@ -316,7 +341,7 @@ struct EpisodeDetailView: View {
     // MARK: - Description Parsing
 
     private func attributedDescription(from html: String) -> AttributedString {
-        // Try to parse as HTML, fall back to plain text
+        // Quick plain-text fallback (used while async HTML parse runs)
         let plainText = html
             .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
             .replacingOccurrences(of: "&nbsp;", with: " ")
@@ -328,6 +353,43 @@ struct EpisodeDetailView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         return AttributedString(plainText)
+    }
+
+    /// Parses HTML description into an AttributedString with tappable links.
+    private func parseHTML(_ html: String) -> AttributedString? {
+        let textColor = UIColor.label.cssColor
+        let linkColor = UIColor.tintColor.cssColor
+        let styledHTML = """
+        <html><head><style>
+        body { font-family: -apple-system; font-size: 17px; color: \(textColor); }
+        a { color: \(linkColor); }
+        </style></head><body>\(html)</body></html>
+        """
+
+        guard let data = styledHTML.data(using: .utf8),
+              let nsAttr = try? NSAttributedString(
+                  data: data,
+                  options: [
+                      .documentType: NSAttributedString.DocumentType.html,
+                      .characterEncoding: String.Encoding.utf8.rawValue
+                  ],
+                  documentAttributes: nil
+              ) else {
+            return nil
+        }
+
+        return try? AttributedString(nsAttr, including: \.uiKit)
+    }
+}
+
+// MARK: - UIColor CSS Helper
+
+extension UIColor {
+    /// Returns a CSS-compatible rgba() color string.
+    var cssColor: String {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        getRed(&r, green: &g, blue: &b, alpha: &a)
+        return "rgba(\(Int(r * 255)),\(Int(g * 255)),\(Int(b * 255)),\(String(format: "%.2f", a)))"
     }
 }
 

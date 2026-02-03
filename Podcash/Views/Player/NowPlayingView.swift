@@ -1,4 +1,5 @@
 import SwiftUI
+import AVKit
 
 struct NowPlayingView: View {
     var playerManager = AudioPlayerManager.shared
@@ -124,9 +125,7 @@ struct NowPlayingView: View {
                     }
                     .contextMenu {
                         Button {
-                            episode.isPlayed = true
-                            episode.playbackPosition = 0
-                            playerManager.stop()
+                            playerManager.markPlayedAndAdvance()
                         } label: {
                             Label("Mark as Played", systemImage: "checkmark.circle")
                         }
@@ -210,6 +209,10 @@ struct NowPlayingView: View {
                         .clipShape(Capsule())
                     }
 
+                    // Audio output picker
+                    AudioRoutePickerButton()
+                        .frame(width: 28, height: 28)
+
                     // Star button
                     Button {
                         episode.isStarred.toggle()
@@ -219,9 +222,9 @@ struct NowPlayingView: View {
                             .foregroundStyle(episode.isStarred ? .yellow : .secondary)
                     }
 
-                    // Share button (only if podcast can be shared)
-                    if let podcast = episode.podcast, podcast.canShare {
-                        ShareLink(item: podcast.shareURL) {
+                    // Share button (only if episode can be shared)
+                    if episode.canShare {
+                        ShareLink(item: episode.shareURL) {
                             Image(systemName: "square.and.arrow.up")
                                 .font(.title2)
                                 .foregroundStyle(.secondary)
@@ -311,14 +314,17 @@ private struct SpeedPickerSheet: View {
 
     @State private var selectedSpeed: Double
     @State private var rememberForPodcast: Bool
+    private let originalSpeed: Double
 
     private let speeds: [Double] = [0.5, 0.75] + stride(from: 1.0, through: 2.0, by: 0.1).map { $0 } + [2.5, 3.0]
 
     init(playerManager: AudioPlayerManager, podcast: Podcast?) {
         self.playerManager = playerManager
         self.podcast = podcast
+        let currentSpeed = playerManager.effectivePlaybackSpeed
+        self.originalSpeed = currentSpeed
         // Initialize with current effective speed
-        _selectedSpeed = State(initialValue: playerManager.effectivePlaybackSpeed)
+        _selectedSpeed = State(initialValue: currentSpeed)
         // If podcast already has override, start with toggle on
         _rememberForPodcast = State(initialValue: podcast?.playbackSpeedOverride != nil)
     }
@@ -350,6 +356,7 @@ private struct SpeedPickerSheet: View {
                     ForEach(speeds, id: \.self) { speed in
                         Button {
                             selectedSpeed = speed
+                            playerManager.previewSpeed(speed)
                         } label: {
                             HStack {
                                 Text(formatSpeed(speed))
@@ -369,6 +376,8 @@ private struct SpeedPickerSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
+                        // Revert to original speed
+                        playerManager.previewSpeed(originalSpeed)
                         dismiss()
                     }
                 }
@@ -377,6 +386,13 @@ private struct SpeedPickerSheet: View {
                         saveAndDismiss()
                     }
                     .fontWeight(.semibold)
+                }
+            }
+            .onChange(of: rememberForPodcast) { _, newValue in
+                if !newValue {
+                    // When toggling off "remember", revert to global speed
+                    selectedSpeed = playerManager.globalPlaybackSpeed
+                    playerManager.previewSpeed(selectedSpeed)
                 }
             }
         }
@@ -409,6 +425,19 @@ private struct SpeedPickerSheet: View {
             return String(format: "%.2gx", speed)
         }
     }
+}
+
+// MARK: - Audio Route Picker (UIKit Wrapper)
+
+private struct AudioRoutePickerButton: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let picker = AVRoutePickerView()
+        picker.tintColor = .secondaryLabel
+        picker.activeTintColor = .tintColor
+        return picker
+    }
+
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
 }
 
 #Preview {

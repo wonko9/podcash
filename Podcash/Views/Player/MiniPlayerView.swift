@@ -47,6 +47,15 @@ struct MiniPlayerView: View {
 
                     Spacer()
 
+                    // Skip backward button
+                    Button {
+                        playerManager.skipBackward()
+                    } label: {
+                        Image(systemName: skipBackwardIcon)
+                            .font(.title3)
+                            .frame(width: 44, height: 44)
+                    }
+
                     // Play/Pause button
                     Button {
                         playerManager.togglePlayPause()
@@ -60,15 +69,13 @@ struct MiniPlayerView: View {
                     Button {
                         playerManager.skipForward()
                     } label: {
-                        Image(systemName: "goforward.30")
+                        Image(systemName: skipForwardIcon)
                             .font(.title3)
                             .frame(width: 44, height: 44)
                     }
                     .contextMenu {
                         Button {
-                            episode.isPlayed = true
-                            episode.playbackPosition = 0
-                            playerManager.stop()
+                            playerManager.markPlayedAndAdvance()
                         } label: {
                             Label("Mark as Played", systemImage: "checkmark.circle")
                         }
@@ -87,6 +94,24 @@ struct MiniPlayerView: View {
     private var progress: Double {
         guard playerManager.duration > 0 else { return 0 }
         return playerManager.currentTime / playerManager.duration
+    }
+
+    private var skipForwardIcon: String {
+        let interval = Int(playerManager.skipForwardInterval)
+        let validIntervals = [5, 10, 15, 30, 45, 60, 75, 90]
+        if validIntervals.contains(interval) {
+            return "goforward.\(interval)"
+        }
+        return "goforward.30"
+    }
+
+    private var skipBackwardIcon: String {
+        let interval = Int(playerManager.skipBackwardInterval)
+        let validIntervals = [5, 10, 15, 30, 45, 60, 75, 90]
+        if validIntervals.contains(interval) {
+            return "gobackward.\(interval)"
+        }
+        return "gobackward.15"
     }
 }
 

@@ -3,6 +3,7 @@ import SwiftData
 
 struct QueueView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.miniPlayerVisible) private var miniPlayerVisible
     @Query(sort: \QueueItem.sortOrder) private var queueItems: [QueueItem]
 
     private var networkMonitor: NetworkMonitor { NetworkMonitor.shared }
@@ -45,17 +46,32 @@ struct QueueView: View {
                         Section("Up Next") {
                             ForEach(queueItems) { item in
                                 if let episode = item.episode {
-                                    QueueEpisodeRow(episode: episode)
-                                        .onTapGesture {
-                                            playFromQueue(item)
+                                    HStack(spacing: 0) {
+                                        Button {
+                                            if let index = queueItems.firstIndex(where: { $0.id == item.id }) {
+                                                deleteItems(at: IndexSet(integer: index))
+                                            }
+                                        } label: {
+                                            Image(systemName: "minus.circle.fill")
+                                                .foregroundStyle(.red)
+                                                .font(.title3)
                                         }
+                                        .buttonStyle(.plain)
+                                        .padding(.trailing, 8)
+
+                                        QueueEpisodeRow(episode: episode)
+                                            .onTapGesture {
+                                                playFromQueue(item)
+                                            }
+                                    }
                                 }
                             }
-                            .onDelete(perform: deleteItems)
                             .onMove(perform: moveItems)
                         }
+                        .environment(\.editMode, .constant(.active))
                     }
                     .listStyle(.plain)
+                    .contentMargins(.bottom, miniPlayerVisible ? 60 : 0, for: .scrollContent)
                 }
             }
             .navigationTitle("Up Next")
@@ -69,9 +85,6 @@ struct QueueView: View {
                         }
                     }
 
-                    ToolbarItem(placement: .topBarLeading) {
-                        EditButton()
-                    }
                 }
             }
             .confirmationDialog(

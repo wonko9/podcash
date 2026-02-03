@@ -3,6 +3,7 @@ import SwiftData
 
 struct LibraryView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.miniPlayerVisible) private var miniPlayerVisible
     @Query(sort: \Podcast.title) private var podcasts: [Podcast]
     @Query(sort: \Folder.sortOrder) private var folders: [Folder]
 
@@ -90,6 +91,7 @@ struct LibraryView: View {
                         }
                     }
                     .listStyle(.plain)
+                    .contentMargins(.bottom, miniPlayerVisible ? 60 : 0, for: .scrollContent)
                     .refreshable {
                         // Trigger background refresh and return immediately
                         refreshManager.refreshAllPodcasts(context: modelContext)

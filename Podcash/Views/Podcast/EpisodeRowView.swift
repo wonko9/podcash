@@ -6,6 +6,11 @@ struct EpisodeRowView: View {
     let episode: Episode
 
     @State private var showCellularConfirmation = false
+    @State private var showDeleteDownloadConfirmation = false
+
+    private var isCurrentlyPlaying: Bool {
+        AudioPlayerManager.shared.currentEpisode?.guid == episode.guid
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -29,8 +34,9 @@ struct EpisodeRowView: View {
             VStack(alignment: .leading, spacing: 4) {
                 // Title
                 Text(episode.title)
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
                     .lineLimit(2)
+                    .minimumScaleFactor(0.9)
                     .foregroundStyle(episode.isPlayed ? .secondary : .primary)
 
                 // Metadata row
@@ -63,7 +69,7 @@ struct EpisodeRowView: View {
             Spacer()
 
             // Action buttons
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 // Star button
                 Button {
                     episode.isStarred.toggle()
@@ -83,27 +89,44 @@ struct EpisodeRowView: View {
                     Image(systemName: episode.isStarred ? "star.fill" : "star")
                         .font(.title2)
                         .foregroundStyle(episode.isStarred ? .yellow : .secondary)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
 
-                // Download button
-                if episode.localFilePath != nil {
+                // Playing indicator or download button
+                if isCurrentlyPlaying {
                     Button {
-                        DownloadManager.shared.deleteDownload(episode)
+                        AudioPlayerManager.shared.togglePlayPause()
+                    } label: {
+                        Image(systemName: AudioPlayerManager.shared.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                } else if episode.localFilePath != nil {
+                    Button {
+                        showDeleteDownloadConfirmation = true
                     } label: {
                         Image(systemName: "arrow.down.circle.fill")
                             .font(.title2)
                             .foregroundStyle(.green)
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
                 } else if let progress = episode.downloadProgress {
                     Button {
                         DownloadManager.shared.cancelDownload(episode)
                     } label: {
                         CircularProgressView(progress: progress)
                             .frame(width: 22, height: 22)
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
                 } else {
                     Button {
                         attemptDownload()
@@ -111,8 +134,10 @@ struct EpisodeRowView: View {
                         Image(systemName: "arrow.down.circle")
                             .font(.title2)
                             .foregroundStyle(.secondary)
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
                 }
             }
         }
@@ -126,6 +151,14 @@ struct EpisodeRowView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("You're on cellular data. Download anyway?")
+        }
+        .alert("Delete Download?", isPresented: $showDeleteDownloadConfirmation) {
+            Button("Delete", role: .destructive) {
+                DownloadManager.shared.deleteDownload(episode)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The downloaded file will be removed from your device.")
         }
     }
 

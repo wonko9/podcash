@@ -10,6 +10,7 @@
 **Milestone 7: Folders** - COMPLETE
 **Milestone 8: Playback Speed + Sleep Timer** - COMPLETE
 **Milestone 9: Polish + Sync** - COMPLETE
+**Milestone 10: Bug Fixes + UX Improvements** - COMPLETE
 
 ## Completed Work
 
@@ -111,6 +112,47 @@
 - [x] Error handling - sync errors shown in Settings
 - [x] Pull-to-refresh - implemented in PodcastDetailView
 - **Test:** Install on second device, verify sync
+
+### Milestone 10: Bug Fixes + UX Improvements (21 fixes)
+
+#### Audio & Playback
+- [x] **Fix 1: Headphone pause/resume** - Re-activate audio session in `resume()` so headphones that need session re-activation after pause work correctly
+- [x] **Fix 2: Mark Played advances queue** - New `markPlayedAndAdvance()` method marks episode as played, posts completion notification, cleans up player, and auto-advances to next queue item. Updated in NowPlayingView, MiniPlayerView, EpisodeContextMenu
+- [x] **Fix 18: AirPods offline delay** - When AirPods reconnect (`newDeviceAvailable`), pre-activate audio session and pre-load player item from local file to reduce playback startup delay
+- [x] **Fix 20: Immediate speed preview** - New `previewSpeed(_:)` method sets player rate immediately. Speed picker now audibly changes speed on tap; Cancel reverts to original speed
+
+#### Now Playing & Mini Player
+- [x] **Fix 5: Audio output picker** - Added `AVRoutePickerView` (wrapped in UIViewRepresentable) to NowPlayingView action buttons row for switching audio output
+- [x] **Fix 19: Skip backward in mini player** - Added skip backward button before play/pause in MiniPlayerView with dynamic icon matching skip interval setting
+- [x] **Fix 21: Speed picker "Remember" toggle** - When toggling off "Remember for this podcast", speed reverts to global playback speed and previews immediately
+
+#### Episode Row Views (EpisodeRowView, AllEpisodesRow, FolderEpisodeRow, StarredEpisodeRow, DownloadedEpisodeRow)
+- [x] **Fix 3: More title room** - Title font changed to `.subheadline.weight(.semibold)` + `.minimumScaleFactor(0.9)`, button spacing reduced 12→8, button frames 44→36
+- [x] **Fix 6: Duration in metadata** - Added `duration.formattedDuration` with bullet separator in metadata row for episodes not in progress (AllEpisodesRow, FolderEpisodeRow, StarredEpisodeRow)
+- [x] **Fix 8: Playing indicator** - Currently playing episode shows play/pause toggle button in accent color instead of download icon across all row views
+- [x] **Fix 10: Queue indicator** - Queue swipe buttons show `text.badge.checkmark` in indigo when episode is already in queue vs `text.badge.plus` when not
+- [x] **Fix 11: Queue toggle** - Queue button toggles: if `isInQueue()`, calls `removeFromQueue()` instead of `addToQueue()`. Applied in swipe actions, context menu, and EpisodeDetailView
+- [x] **Fix 16: Download delete confirmation** - Green download icon tap shows confirmation alert before deleting. Added `@State var showDeleteDownloadConfirmation` to all row views and EpisodeDetailView
+
+#### Episode Detail
+- [x] **Fix 4: Description formatting** - Replaced regex HTML stripping with `NSAttributedString(data:options:.html)` → `AttributedString`. Styled with system font CSS. Links are tappable. Parsed async in `.task` and cached in `@State`. Added `UIColor.cssColor` extension
+
+#### Content & Navigation
+- [x] **Fix 9: Mini player keyboard fix** - Added `.ignoresSafeArea(.keyboard)` to prevent keyboard pushing mini player. Added `.transition(.move(edge: .bottom))` with animation
+- [x] **Fix 13: Queue badge** - Added `@Query var queueItems` and `.badge(queueItems.count)` on Queue tab
+- [x] **Fix 17: Offline indicator** - Small capsule overlay ("Offline" + wifi.slash icon) above tab bar when `!NetworkMonitor.shared.isConnected`
+
+#### Queue Screen
+- [x] **Fix 14: Queue screen improvements** - Removed EditButton, added inline red minus buttons (`minus.circle.fill`) for removal, set `.environment(\.editMode, .constant(.active))` so drag handles are always visible
+
+#### Settings
+- [x] **Fix 12: Rename offline setting** - Changed "Simulate Offline Mode" → "Offline Mode", info text changed to "Only downloaded episodes will be available"
+
+#### Downloads
+- [x] **Fix 15: Download state indication** - DownloadedEpisodeRow shows `checkmark.circle.fill` in `.secondary` when played, `arrow.down.circle.fill` in `.green` when not played
+- [x] **Fix 7: Download progress throttling** - Added `lastProgressUpdate` dictionary, skip UI updates if less than 0.3s since last update (unless progress ≥ 0.99). Clean up dictionary in completion/error handlers
+
+- **Test:** Headphone play/pause with Bluetooth headphones; "Mark as Played" on currently playing episode with queue items → auto-advances; HTML links in episode descriptions are tappable; speed changes audible immediately in picker; queue badge updates when adding/removing; offline capsule appears in offline mode; download progress doesn't lag scrolling; queue drag reorder and minus button removal work; download delete confirmation on green icon tap
 
 ## Architecture Decisions
 

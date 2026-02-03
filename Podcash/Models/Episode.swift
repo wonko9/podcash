@@ -58,4 +58,23 @@ final class Episode {
     var displayArtworkURL: String? {
         artworkURL ?? podcast?.artworkURL
     }
+
+    // Episode link (from RSS feed, if available)
+    var episodeLink: String?
+
+    /// The URL to use when sharing this episode
+    var shareURL: String {
+        // Prefer episode-specific link if available
+        if let episodeLink = episodeLink, !episodeLink.isEmpty {
+            return episodeLink
+        }
+        
+        // Fall back to podcast share URL
+        return podcast?.shareURL ?? ""
+    }
+
+    /// Whether this episode can be shared
+    var canShare: Bool {
+        !shareURL.isEmpty
+    }
 }

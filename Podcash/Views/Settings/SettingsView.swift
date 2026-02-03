@@ -3,6 +3,7 @@ import SwiftData
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.miniPlayerVisible) private var miniPlayerVisible
     @Query private var allEpisodes: [Episode]
     @Query private var settings: [AppSettings]
 
@@ -157,7 +158,6 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    // Developer/Testing: Simulate offline mode
                     Toggle(isOn: Binding(
                         get: { networkMonitor.simulateOffline },
                         set: { networkMonitor.simulateOffline = $0 }
@@ -165,7 +165,7 @@ struct SettingsView: View {
                         HStack {
                             Image(systemName: "wifi.slash")
                                 .foregroundStyle(.orange)
-                            Text("Simulate Offline Mode")
+                            Text("Offline Mode")
                         }
                     }
 
@@ -173,7 +173,7 @@ struct SettingsView: View {
                         HStack {
                             Image(systemName: "info.circle")
                                 .foregroundStyle(.secondary)
-                            Text("App will behave as if offline")
+                            Text("Only downloaded episodes will be available")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -223,6 +223,19 @@ struct SettingsView: View {
                     }
                 }
 
+                // Debug & Diagnostics
+                Section("Debug") {
+                    NavigationLink {
+                        CrashLogsView()
+                    } label: {
+                        HStack {
+                            Image(systemName: "ladybug.fill")
+                                .foregroundStyle(.red)
+                            Text("Crash Logs")
+                        }
+                    }
+                }
+
                 // About
                 Section("About") {
                     HStack {
@@ -233,6 +246,7 @@ struct SettingsView: View {
                     }
                 }
             }
+            .contentMargins(.bottom, miniPlayerVisible ? 60 : 0, for: .scrollContent)
             .navigationTitle("Settings")
             .onAppear {
                 updateDownloadSize()
