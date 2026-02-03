@@ -222,7 +222,8 @@ struct ExportImportView: View {
                 
                 await MainActor.run {
                     alertTitle = "Import Successful"
-                    alertMessage = exportService.lastError ?? "Your data has been imported successfully."
+                    let baseMessage = exportService.lastError ?? "Your data has been imported successfully."
+                    alertMessage = baseMessage + "\n\nPlease restart the app for all episodes to appear in the All Episodes view."
                     showAlert = true
                     isProcessing = false
                     selectedImportURL = nil
