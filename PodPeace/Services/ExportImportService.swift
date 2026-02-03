@@ -237,15 +237,24 @@ final class ExportImportService {
     private func importFullData(_ exportData: FullDataExport, context: ModelContext) async throws {
         let feedService = FeedService.shared
         
+        logger.info("Starting full data import with \(exportData.podcasts.count) podcasts")
+        
         // 1. Import podcasts first
         let existingPodcastDescriptor = FetchDescriptor<Podcast>()
         let existingPodcasts = try context.fetch(existingPodcastDescriptor)
         var podcastsByURL = Dictionary(uniqueKeysWithValues: existingPodcasts.map { ($0.feedURL, $0) })
         
-        for exportPodcast in exportData.podcasts {
+        var importedCount = 0
+        var failedCount = 0
+        
+        for (index, exportPodcast) in exportData.podcasts.enumerated() {
+            logger.info("Importing podcast \(index + 1)/\(exportData.podcasts.count): \(exportPodcast.feedURL)")
+            
             if podcastsByURL[exportPodcast.feedURL] == nil {
                 do {
                     let (podcast, episodes) = try await feedService.fetchPodcast(from: exportPodcast.feedURL)
+                    
+                    logger.info("Fetched podcast with \(episodes.count) episodes")
                     
                     // Apply saved playback speed override
                     if let speedOverride = exportPodcast.playbackSpeedOverride {
@@ -253,10 +262,20 @@ final class ExportImportService {
                     }
                     
                     context.insert(podcast)
-                    episodes.forEach { context.insert($0) }
+                    episodes.forEach { episode in
+                        context.insert(episode)
+                    }
+                    
+                    // Save after each podcast to avoid memory issues
+                    try context.save()
+                    
                     podcastsByURL[exportPodcast.feedURL] = podcast
+                    importedCount += 1
+                    
+                    logger.info("Successfully imported podcast \(index + 1)")
                 } catch {
-                    // Continue with other podcasts if one fails
+                    logger.error("Failed to import podcast: \(error.localizedDescription)")
+                    failedCount += 1
                     continue
                 }
             } else if let podcast = podcastsByURL[exportPodcast.feedURL],
@@ -266,12 +285,19 @@ final class ExportImportService {
             }
         }
         
+        logger.info("Imported \(importedCount) podcasts, \(failedCount) failed")
         try context.save()
         
         // 2. Import folders
+        logger.info("Importing \(exportData.folders.count) folders")
         let existingFolderDescriptor = FetchDescriptor<Folder>()
         let existingFolders = try context.fetch(existingFolderDescriptor)
         var foldersById = Dictionary(uniqueKeysWithValues: existingFolders.map { ($0.id.uuidString, $0) })
+        
+        // Re-fetch podcasts to get fresh references after save
+        let podcastDescriptor = FetchDescriptor<Podcast>()
+        let allPodcasts = try context.fetch(podcastDescriptor)
+        podcastsByURL = Dictionary(uniqueKeysWithValues: allPodcasts.map { ($0.feedURL, $0) })
         
         for exportFolder in exportData.folders {
             if let existingFolder = foldersById[exportFolder.id] {
@@ -294,39 +320,51 @@ final class ExportImportService {
         }
         
         try context.save()
+        logger.info("Folders imported successfully")
         
         // 3. Import episode states
+        logger.info("Importing episode states for \(exportData.episodeStates.count) episodes")
         let episodeDescriptor = FetchDescriptor<Episode>()
         let allEpisodes = try context.fetch(episodeDescriptor)
+        logger.info("Found \(allEpisodes.count) episodes in database")
+        
         let episodesByGUID = Dictionary(uniqueKeysWithValues: allEpisodes.map { ($0.guid, $0) })
         
+        var statesApplied = 0
         for state in exportData.episodeStates {
             if let episode = episodesByGUID[state.guid] {
                 episode.isPlayed = state.isPlayed
                 episode.isStarred = state.isStarred
                 episode.playbackPosition = state.playbackPosition
+                statesApplied += 1
                 // Note: We don't restore downloads, user needs to re-download
             }
         }
         
+        logger.info("Applied states to \(statesApplied) episodes")
         try context.save()
         
         // 4. Import queue
+        logger.info("Importing queue with \(exportData.queue.count) items")
         // Clear existing queue first
         let existingQueueDescriptor = FetchDescriptor<QueueItem>()
         let existingQueue = try context.fetch(existingQueueDescriptor)
         existingQueue.forEach { context.delete($0) }
         
+        var queueItemsAdded = 0
         for exportQueueItem in exportData.queue {
             if let episode = episodesByGUID[exportQueueItem.episodeGUID] {
                 let queueItem = QueueItem(episode: episode, sortOrder: exportQueueItem.order)
                 context.insert(queueItem)
+                queueItemsAdded += 1
             }
         }
         
+        logger.info("Added \(queueItemsAdded) items to queue")
         try context.save()
         
         // 5. Import settings
+        logger.info("Importing settings")
         let settings = AppSettings.getOrCreate(context: context)
         settings.keepLatestDownloadsPerPodcast = exportData.settings.keepLatestDownloadsPerPodcast
         settings.storageLimitGB = exportData.settings.storageLimitGB
@@ -338,6 +376,15 @@ final class ExportImportService {
         AudioPlayerManager.shared.skipBackwardInterval = exportData.settings.skipBackwardInterval
         
         try context.save()
+        
+        // Final verification
+        let finalEpisodeCount = try context.fetch(FetchDescriptor<Episode>()).count
+        let finalPodcastCount = try context.fetch(FetchDescriptor<Podcast>()).count
+        logger.info("Import complete! Final counts - Podcasts: \(finalPodcastCount), Episodes: \(finalEpisodeCount)")
+        
+        if failedCount > 0 {
+            lastError = "Import completed with \(failedCount) failed podcast(s). Successfully imported \(importedCount) podcast(s) with \(finalEpisodeCount) episodes."
+        }
     }
     
     // MARK: - Helper Methods
