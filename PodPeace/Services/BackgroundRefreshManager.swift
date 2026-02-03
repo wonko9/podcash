@@ -5,9 +5,9 @@ import os
 /// Manages iOS background app refresh for podcast updates
 final class BackgroundRefreshManager {
     static let shared = BackgroundRefreshManager()
-    static let taskIdentifier = "com.personal.podcash.refresh"
-
-    private let logger = Logger(subsystem: "com.personal.podcash", category: "BackgroundRefresh")
+    static let taskIdentifier = "com.personal.podpeace.refresh"
+    
+    private let logger = Logger(subsystem: "com.personal.podpeace", category: "BackgroundRefresh")
 
     private init() {}
 

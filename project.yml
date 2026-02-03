@@ -1,4 +1,4 @@
-name: Podcash
+name: podpeace
 options:
   bundleIdPrefix: com.personal
   deploymentTarget:
@@ -16,21 +16,21 @@ settings:
     CODE_SIGN_STYLE: Automatic
 
 targets:
-  Podcash:
+  PodPeace:
     type: application
     platform: iOS
     sources:
-      - Podcash
+      - PodPeace
     dependencies:
       - package: FeedKit
     settings:
       base:
-        INFOPLIST_FILE: Podcash/Info.plist
-        PRODUCT_BUNDLE_IDENTIFIER: com.personal.podcash
+        INFOPLIST_FILE: PodPeace/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.personal.podpeace
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1"
     info:
-      path: Podcash/Info.plist
+      path: PodPeace/Info.plist
       properties:
         UILaunchScreen:
           UIColorName: ""
@@ -43,12 +43,12 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        CFBundleDisplayName: Podcash
+        CFBundleDisplayName: Pod Peace
 
 schemes:
-  Podcash:
+  PodPeace:
     build:
       targets:
-        Podcash: all
+        PodPeace: all
     run:
       config: Debug
