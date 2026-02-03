@@ -2,19 +2,19 @@
 from pbxproj import XcodeProject
 
 # Path to the project file
-project_path = '/Users/apisoni/dev/podcash/Podcash.xcodeproj/project.pbxproj'
+project_path = '/Users/apisoni/dev/podcash/PodPeace.xcodeproj/project.pbxproj'
 
 # Load the project
 project = XcodeProject.load(project_path)
 
 # File to add
-file_path = 'Podcash/Views/Episode/EpisodeDetailView.swift'
+file_path = 'PodPeace/Views/Episode/EpisodeDetailView.swift'
 
 # Find the main target (typically the first one, or we can search by name)
 targets = project.objects.get_targets()
 main_target = None
 for target in targets:
-    if target.name == 'Podcash':
+    if target.name == 'PodPeace':
         main_target = target
         break
 
@@ -27,7 +27,7 @@ if main_target:
     # The add_file method will create the file reference and add it to the build phase
     result = project.add_file(
         file_path,
-        parent=project.get_or_create_group('Episode', parent=project.get_or_create_group('Views', parent=project.get_or_create_group('Podcash'))),
+        parent=project.get_or_create_group('Episode', parent=project.get_or_create_group('Views', parent=project.get_or_create_group('PodPeace'))),
         target_name=main_target.name
     )
     
