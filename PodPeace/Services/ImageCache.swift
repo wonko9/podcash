@@ -15,7 +15,15 @@ actor ImageCache {
         // Increase memory cache limits
         Self.memoryCache.countLimit = 200
         Self.memoryCache.totalCostLimit = 100 * 1024 * 1024 // 100 MB
-        setupCacheDirectory()
+        
+        // Setup cache directory synchronously in init (safe since it's just file system operations)
+        if let cachePath = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            let imageCache = cachePath.appendingPathComponent("ImageCache", isDirectory: true)
+            if !FileManager.default.fileExists(atPath: imageCache.path) {
+                try? FileManager.default.createDirectory(at: imageCache, withIntermediateDirectories: true)
+            }
+            cacheDirectory = imageCache
+        }
     }
 
     /// Synchronous memory cache lookup - can be called from any thread
@@ -37,15 +45,6 @@ actor ImageCache {
         return String(format: "%016llx", hash) + ".jpg"
     }
 
-    private func setupCacheDirectory() {
-        if let cachePath = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first {
-            let imageCache = cachePath.appendingPathComponent("ImageCache", isDirectory: true)
-            if !fileManager.fileExists(atPath: imageCache.path) {
-                try? fileManager.createDirectory(at: imageCache, withIntermediateDirectories: true)
-            }
-            cacheDirectory = imageCache
-        }
-    }
 
     func image(for url: URL) async -> UIImage? {
         let key = cacheKey(for: url)
@@ -76,7 +75,7 @@ actor ImageCache {
             // Store in caches
             let cost = data.count
             Self.memoryCache.setObject(image, forKey: key as NSString, cost: cost)
-            await self.saveToDisk(image: image, key: key)
+            self.saveToDisk(image: image, key: key)
 
             return image
         }
@@ -126,7 +125,11 @@ actor ImageCache {
         Self.memoryCache.removeAllObjects()
         if let cacheDir = cacheDirectory {
             try? fileManager.removeItem(at: cacheDir)
-            setupCacheDirectory()
+            
+            // Recreate cache directory
+            if !fileManager.fileExists(atPath: cacheDir.path) {
+                try? fileManager.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+            }
         }
     }
 }
