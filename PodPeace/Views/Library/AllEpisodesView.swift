@@ -6,8 +6,6 @@ struct AllEpisodesView: View {
     @Environment(\.miniPlayerVisible) private var miniPlayerVisible
     @Query(sort: \Podcast.title) private var allPodcasts: [Podcast]
     @Query(sort: \Folder.sortOrder) private var allFolders: [Folder]
-    // Query episodes directly - much faster than traversing podcast relationships
-    @Query(sort: \Episode.publishedDate, order: .reverse) private var allEpisodes: [Episode]
 
     private var networkMonitor: NetworkMonitor { NetworkMonitor.shared }
 
@@ -25,6 +23,11 @@ struct AllEpisodesView: View {
     @State private var showCreateFolder = false
     @State private var podcastForNewFolder: Podcast?
     @State private var displayLimit = 100  // Start with 100, load more on scroll
+    
+    // Performance optimization: Load episodes on-demand instead of all at once
+    @State private var loadedEpisodes: [Episode] = []
+    @State private var totalEpisodeCount: Int = 0
+    @State private var isLoadingEpisodes = false
 
     // Cache only the folder lookup (rarely changes) - filtered episodes computed fresh for real-time updates
     @State private var cachedPodcastsInFolders: Set<String> = []
@@ -105,11 +108,24 @@ struct AllEpisodesView: View {
                 showDownloadedOnly = true
             }
             rebuildFolderCache()
+            loadEpisodes()
         }
-        .onChange(of: sortNewestFirst) { _, _ in displayLimit = 100 }
-        .onChange(of: showStarredOnly) { _, _ in displayLimit = 100 }
-        .onChange(of: showDownloadedOnly) { _, _ in displayLimit = 100 }
-        .onChange(of: allFolders.count) { _, _ in rebuildFolderCache() }
+        .onChange(of: sortNewestFirst) { _, _ in
+            displayLimit = 100
+            loadEpisodes()
+        }
+        .onChange(of: showStarredOnly) { _, _ in
+            displayLimit = 100
+            loadEpisodes()
+        }
+        .onChange(of: showDownloadedOnly) { _, _ in
+            displayLimit = 100
+            loadEpisodes()
+        }
+        .onChange(of: allFolders.count) { _, _ in
+            rebuildFolderCache()
+            loadEpisodes()
+        }
         .alert("Download on Cellular?", isPresented: $showCellularConfirmation) {
             Button("Download") {
                 if let episode = episodePendingDownload {
@@ -225,7 +241,20 @@ struct AllEpisodesView: View {
 
         // Episodes list
         Section {
-            if filteredEpisodes.isEmpty {
+            if isLoadingEpisodes && loadedEpisodes.isEmpty {
+                // Initial loading state
+                HStack {
+                    Spacer()
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Loading episodes...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 40)
+                    Spacer()
+                }
+            } else if filteredEpisodes.isEmpty {
                 ContentUnavailableView(
                     emptyStateTitle,
                     systemImage: emptyStateIcon,
@@ -339,60 +368,89 @@ struct AllEpisodesView: View {
         }
     }
 
-    // MARK: - Filtered Episodes (computed fresh for real-time updates)
+    // MARK: - Filtered Episodes (optimized for large datasets)
 
     /// How many more episodes to load when scrolling
     private let loadMoreIncrement = 50
 
-    /// Base filtered episodes (before pagination) - computed fresh so changes are reflected immediately
-    private var baseFilteredEpisodes: [Episode] {
-        // Get base episodes (filtered for unsorted mode if needed)
-        var episodes: [Episode]
-        if showUnsortedOnly {
-            episodes = allEpisodes.filter { episode in
-                guard let feedURL = episode.podcast?.feedURL else { return false }
-                return !cachedPodcastsInFolders.contains(feedURL)
-            }
-        } else {
-            episodes = Array(allEpisodes)
-        }
-
-        // Apply filters
-        if showStarredOnly {
-            episodes = episodes.filter { $0.isStarred }
-        }
-        if showDownloadedOnly {
-            episodes = episodes.filter { $0.localFilePath != nil }
-        }
-
-        // Apply sort (allEpisodes is already sorted newest first from @Query)
-        if !sortNewestFirst {
-            episodes = episodes.reversed()
-        }
-
-        return episodes
-    }
-
-    /// Only create tuples for episodes we're actually displaying (expensive podcast lookup)
+    /// Filtered episodes with podcast relationships - only what's currently loaded
     private var filteredEpisodes: [(episode: Episode, podcast: Podcast)] {
-        baseFilteredEpisodes.prefix(displayLimit).compactMap { episode in
+        loadedEpisodes.compactMap { episode in
             guard let podcast = episode.podcast else { return nil }
             return (episode: episode, podcast: podcast)
         }
     }
 
-    private var totalEpisodeCount: Int {
-        baseFilteredEpisodes.count
-    }
-
     private var hasMoreEpisodes: Bool {
-        displayLimit < totalEpisodeCount
+        loadedEpisodes.count < totalEpisodeCount
     }
 
-    private func loadMoreEpisodes() {
-        if hasMoreEpisodes {
-            displayLimit += loadMoreIncrement
+    /// Load episodes from database with filters applied at query level (much faster)
+    private func loadEpisodes(limit: Int? = nil) {
+        guard !isLoadingEpisodes else { return }
+        isLoadingEpisodes = true
+        
+        Task {
+            await MainActor.run {
+                do {
+                    // Build predicate based on filters
+                    let finalPredicate: Predicate<Episode>? = {
+                        if showStarredOnly && showDownloadedOnly {
+                            return #Predicate<Episode> { $0.isStarred == true && $0.localFilePath != nil }
+                        } else if showStarredOnly {
+                            return #Predicate<Episode> { $0.isStarred == true }
+                        } else if showDownloadedOnly {
+                            return #Predicate<Episode> { $0.localFilePath != nil }
+                        } else {
+                            return nil
+                        }
+                    }()
+                    
+                    // Create descriptor with sort and limit
+                    var descriptor = FetchDescriptor<Episode>(
+                        predicate: finalPredicate,
+                        sortBy: [SortDescriptor(\Episode.publishedDate, order: sortNewestFirst ? .reverse : .forward)]
+                    )
+                    
+                    descriptor.fetchLimit = limit ?? displayLimit
+                    
+                    // Fetch episodes
+                    let episodes = try modelContext.fetch(descriptor)
+                    
+                    // Filter for unsorted mode if needed (can't do this in predicate easily)
+                    let filteredForUnsorted: [Episode]
+                    if showUnsortedOnly {
+                        filteredForUnsorted = episodes.filter { episode in
+                            guard let feedURL = episode.podcast?.feedURL else { return false }
+                            return !cachedPodcastsInFolders.contains(feedURL)
+                        }
+                    } else {
+                        filteredForUnsorted = episodes
+                    }
+                    
+                    loadedEpisodes = filteredForUnsorted
+                    
+                    // Get total count (without limit) - only count, don't load all data
+                    var countDescriptor = FetchDescriptor<Episode>(predicate: finalPredicate)
+                    let allEpisodes = try modelContext.fetch(countDescriptor)
+                    totalEpisodeCount = showUnsortedOnly ? allEpisodes.filter { episode in
+                        guard let feedURL = episode.podcast?.feedURL else { return false }
+                        return !cachedPodcastsInFolders.contains(feedURL)
+                    }.count : allEpisodes.count
+                    
+                } catch {
+                    print("Error loading episodes: \(error)")
+                }
+                
+                isLoadingEpisodes = false
+            }
         }
+    }
+    
+    private func loadMoreEpisodes() {
+        guard !isLoadingEpisodes && hasMoreEpisodes else { return }
+        displayLimit += loadMoreIncrement
+        loadEpisodes(limit: displayLimit)
     }
 
     // MARK: - Cache Management
