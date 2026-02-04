@@ -20,7 +20,20 @@ struct PodPeaceApp: App {
         do {
             return try ModelContainer(for: schema, configurations: [modelConfiguration])
         } catch {
-            fatalError("Could not create ModelContainer: \(error)")
+            print("❌ ModelContainer creation failed: \(error)")
+            print("❌ Error details: \(String(describing: error))")
+            
+            // Try to delete the old database and start fresh
+            let url = modelConfiguration.url
+            print("⚠️ Attempting to delete corrupted database at: \(url)")
+            try? FileManager.default.removeItem(at: url)
+            
+            // Try again with fresh database
+            do {
+                return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            } catch {
+                fatalError("Could not create ModelContainer even after deleting old database: \(error)")
+            }
         }
     }()
 
