@@ -108,7 +108,17 @@ struct EpisodeContextMenu: View {
                AudioPlayerManager.shared.currentEpisode?.guid == episode.guid {
                 AudioPlayerManager.shared.markPlayedAndAdvance()
             } else {
+                let wasPlayed = episode.isPlayed
                 episode.isPlayed.toggle()
+                
+                // If marking as played, post notification for download cleanup
+                if !wasPlayed && episode.isPlayed {
+                    NotificationCenter.default.post(
+                        name: .episodePlaybackCompleted,
+                        object: nil,
+                        userInfo: ["guid": episode.guid]
+                    )
+                }
             }
         } label: {
             Label(

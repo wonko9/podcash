@@ -658,9 +658,16 @@ final class AudioPlayerManager {
         episode.playbackPosition = currentTime
 
         // Mark as played if near the end (within 30 seconds)
-        if duration > 0 && currentTime >= duration - 30 {
+        if duration > 0 && currentTime >= duration - 30 && !episode.isPlayed {
             episode.isPlayed = true
             episode.playbackPosition = 0
+            
+            // Notify for download cleanup
+            NotificationCenter.default.post(
+                name: .episodePlaybackCompleted,
+                object: nil,
+                userInfo: ["guid": episode.guid]
+            )
         }
 
         // Save last episode GUID for restoration on next launch

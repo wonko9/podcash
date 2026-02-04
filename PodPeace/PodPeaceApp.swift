@@ -65,6 +65,9 @@ struct PodPeaceApp: App {
 
                     // Clean up orphaned downloads (stuck downloads from previous sessions)
                     DownloadManager.shared.cleanupOrphanedDownloads(context: context)
+                    
+                    // Clean up completed episodes that weren't deleted
+                    DownloadCleanupService.shared.cleanupCompletedEpisodesOnLaunch(context: context)
 
                     // Restore active downloads from background session
                     DownloadManager.shared.restoreActiveDownloads(context: context)

@@ -31,6 +31,9 @@ final class AppSettings: @unchecked Sendable {
 
     // Refresh tracking
     var lastGlobalRefresh: Date?
+    
+    // UI state
+    var selectedTab: Int = 0  // 0 = Library, 1 = Downloads, 2 = Starred, 3 = Queue, 4 = Settings
 
     init() {}
 

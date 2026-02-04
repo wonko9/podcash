@@ -12,16 +12,51 @@ final class DownloadCleanupService: @unchecked Sendable {
     private init() {}
 
     // MARK: - Public Methods
+    
+    /// Cleans up downloads for completed episodes on app launch
+    /// This catches any episodes that were completed but didn't get cleaned up
+    func cleanupCompletedEpisodesOnLaunch(context: ModelContext) {
+        let descriptor = FetchDescriptor<Episode>(
+            predicate: #Predicate { $0.localFilePath != nil && $0.isPlayed }
+        )
+        
+        guard let episodes = try? context.fetch(descriptor) else {
+            logger.error("Failed to fetch episodes for launch cleanup")
+            return
+        }
+        
+        logger.info("Found \(episodes.count) completed episode(s) with downloads on launch")
+        
+        var deletedCount = 0
+        var skippedCount = 0
+        for episode in episodes {
+            let inQueue = isInQueue(episode, context: context)
+            
+            // Only protect if in queue (starred episodes can be deleted)
+            if inQueue {
+                logger.info("Skipping queued episode: '\(episode.title)'")
+                skippedCount += 1
+                continue
+            }
+            
+            // Delete the download (keeps starred status)
+            logger.info("Deleting completed episode: '\(episode.title)' (starred: \(episode.isStarred))")
+            DownloadManager.shared.deleteDownload(episode)
+            deletedCount += 1
+        }
+        
+        logger.info("Launch cleanup complete: deleted \(deletedCount), skipped \(skippedCount) queued")
+    }
 
     /// Called when an episode finishes playing - deletes the download if not protected
     func onEpisodeCompleted(_ episode: Episode, context: ModelContext) {
-        // Don't delete if starred or in queue
-        guard !episode.isStarred && !isInQueue(episode, context: context) else {
-            logger.info("Episode completed but protected (starred or queued): \(episode.title)")
+        // Only protect if in queue (starred episodes can be deleted)
+        guard !isInQueue(episode, context: context) else {
+            logger.info("Episode completed but queued: \(episode.title)")
             return
         }
 
-        // Delete the download
+        // Delete the download (keeps starred status)
         if episode.localFilePath != nil {
             DownloadManager.shared.deleteDownload(episode)
             logger.info("Auto-deleted completed episode: \(episode.title)")
@@ -99,13 +134,13 @@ final class DownloadCleanupService: @unchecked Sendable {
             .filter { $0.localFilePath != nil }
             .sorted { ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast) }
 
-        // Skip protected episodes and keep track of how many we're keeping
+        // Skip queued episodes and keep track of how many we're keeping
         var keptCount = 0
         for episode in downloadedEpisodes {
-            let isProtected = episode.isStarred || isInQueue(episode, context: context)
+            let isQueued = isInQueue(episode, context: context)
 
-            if isProtected {
-                // Protected episodes don't count toward limit
+            if isQueued {
+                // Queued episodes don't count toward limit
                 continue
             }
 
@@ -139,10 +174,10 @@ final class DownloadCleanupService: @unchecked Sendable {
 
         guard let episodes = try? context.fetch(descriptor) else { return [] }
 
-        // Filter out protected episodes (starred or in queue)
+        // Filter out only queued episodes (starred episodes can be deleted)
         // Prioritize effectively completed episodes for deletion
         return episodes
-            .filter { !$0.isStarred && !isInQueue($0, context: context) }
+            .filter { !isInQueue($0, context: context) }
             .sorted { episode1, episode2 in
                 // Effectively completed episodes should be deleted first
                 let completed1 = isEffectivelyCompleted(episode1)

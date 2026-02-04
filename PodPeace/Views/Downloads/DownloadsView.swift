@@ -231,11 +231,19 @@ private struct DownloadedEpisodeRow: View {
             .clipShape(RoundedRectangle(cornerRadius: 6))
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(episode.title)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.9)
-                    .foregroundStyle(episode.isPlayed ? .secondary : .primary)
+                HStack(spacing: 4) {
+                    Text(episode.title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.9)
+                        .foregroundStyle(episode.isPlayed ? .secondary : .primary)
+                    
+                    if episode.isStarred {
+                        Image(systemName: "star.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.yellow)
+                    }
+                }
 
                 if let podcast = episode.podcast {
                     Text(podcast.title)
