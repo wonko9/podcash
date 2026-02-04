@@ -3,8 +3,8 @@ import SwiftData
 import os
 
 /// Manages automatic cleanup of downloaded episodes
-final class DownloadCleanupService {
-    static let shared = DownloadCleanupService()
+final class DownloadCleanupService: @unchecked Sendable {
+    nonisolated(unsafe) static let shared = DownloadCleanupService()
 
     private let logger = AppLogger.download
     private let fileManager = FileManager.default

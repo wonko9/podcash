@@ -1,10 +1,10 @@
-import BackgroundTasks
+@preconcurrency import BackgroundTasks
 import SwiftData
 import os
 
 /// Manages iOS background app refresh for podcast updates
-final class BackgroundRefreshManager {
-    static let shared = BackgroundRefreshManager()
+final class BackgroundRefreshManager: @unchecked Sendable {
+    nonisolated(unsafe) static let shared = BackgroundRefreshManager()
     static let taskIdentifier = "com.personal.podpeace.refresh"
     
     private let logger = Logger(subsystem: "com.personal.podpeace", category: "BackgroundRefresh")
@@ -48,24 +48,25 @@ final class BackgroundRefreshManager {
     // MARK: - Private Methods
 
     private func handleAppRefresh(task: BGAppRefreshTask) {
+        let logger = self.logger
         logger.info("Background refresh task started")
 
         // Schedule the next refresh before we do anything else
         scheduleAppRefresh()
 
         // Create a task to perform the refresh
-        let refreshTask = Task {
-            await performRefresh()
+        let refreshTask = Task { @MainActor [weak self] in
+            await self?.performRefresh()
         }
 
         // Handle task expiration
         task.expirationHandler = {
-            self.logger.warning("Background refresh task expired")
+            logger.warning("Background refresh task expired")
             refreshTask.cancel()
         }
 
         // Wait for the refresh to complete
-        Task {
+        Task { [logger, task] in
             await refreshTask.value
             task.setTaskCompleted(success: true)
             logger.info("Background refresh task completed")

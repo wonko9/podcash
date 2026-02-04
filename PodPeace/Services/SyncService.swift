@@ -4,8 +4,8 @@ import os
 
 /// Syncs app data via iCloud Drive (not CloudKit)
 @Observable
-final class SyncService {
-    static let shared = SyncService()
+final class SyncService: @unchecked Sendable {
+    nonisolated(unsafe) static let shared = SyncService()
 
     private let logger = AppLogger.sync
 
@@ -39,12 +39,13 @@ final class SyncService {
     // MARK: - Change-Triggered Sync
 
     /// Call this when data changes to trigger a debounced sync
+    @MainActor
     func scheduleSync(context: ModelContext) {
         // Cancel any pending sync
         syncDebounceTask?.cancel()
 
         // Schedule new sync after debounce interval
-        syncDebounceTask = Task {
+        syncDebounceTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(syncDebounceInterval))
 
             guard !Task.isCancelled else { return }
@@ -99,17 +100,19 @@ final class SyncService {
 
     // MARK: - Sync Operations
 
+    @MainActor
     func syncNow(context: ModelContext) async {
         guard !isSyncing else { return }
 
-        await MainActor.run {
-            isSyncing = true
-            syncError = nil
-        }
+        isSyncing = true
+        syncError = nil
 
         do {
+            // Capture URL before going nonisolated
+            let url = syncFileURL
+            
             // Read cloud data first
-            let cloudData = try await readCloudData()
+            let cloudData = try await readCloudData(from: url)
 
             // Export local data
             let localData = try await exportLocalData(context: context)
@@ -121,17 +124,13 @@ final class SyncService {
             try await importData(mergedData, context: context)
 
             // Write merged data to cloud
-            try await writeCloudData(mergedData)
+            try await writeCloudData(mergedData, to: url)
 
-            await MainActor.run {
-                lastSyncDate = Date()
-                isSyncing = false
-            }
+            lastSyncDate = Date()
+            isSyncing = false
         } catch {
-            await MainActor.run {
-                syncError = error.localizedDescription
-                isSyncing = false
-            }
+            syncError = error.localizedDescription
+            isSyncing = false
             logger.error("Sync error: \(error.localizedDescription)")
         }
     }
@@ -273,8 +272,9 @@ final class SyncService {
         return localContainer?.appendingPathComponent(syncFileName)
     }
 
-    private func readCloudData() async throws -> SyncData? {
-        guard let url = syncFileURL else { return nil }
+    @MainActor
+    private func readCloudData(from url: URL?) async throws -> SyncData? {
+        guard let url = url else { return nil }
 
         guard FileManager.default.fileExists(atPath: url.path) else {
             return nil
@@ -284,8 +284,9 @@ final class SyncService {
         return try JSONDecoder().decode(SyncData.self, from: data)
     }
 
-    private func writeCloudData(_ syncData: SyncData) async throws {
-        guard let url = syncFileURL else { return }
+    @MainActor
+    private func writeCloudData(_ syncData: SyncData, to url: URL?) async throws {
+        guard let url = url else { return }
 
         let data = try JSONEncoder().encode(syncData)
         try data.write(to: url, options: .atomic)

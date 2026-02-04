@@ -12,8 +12,8 @@ enum DownloadResult {
 }
 
 /// Manages episode downloads with background URLSession support
-final class DownloadManager: NSObject {
-    static let shared = DownloadManager()
+final class DownloadManager: NSObject, @unchecked Sendable {
+    nonisolated(unsafe) static let shared = DownloadManager()
 
     private let logger = AppLogger.download
     private var urlSession: URLSession!
@@ -45,6 +45,7 @@ final class DownloadManager: NSObject {
     ///   - isAutoDownload: Whether this is an automatic download (uses different preference)
     ///   - context: ModelContext to fetch settings
     /// - Returns: DownloadResult indicating whether to proceed
+    @MainActor
     func checkDownloadAllowed(_ episode: Episode, isAutoDownload: Bool = false, context: ModelContext) -> DownloadResult {
         guard URL(string: episode.audioURL) != nil else {
             return .blocked(reason: "Invalid URL")
@@ -86,6 +87,7 @@ final class DownloadManager: NSObject {
 
     /// Downloads an episode with network preference checking
     /// - Returns: DownloadResult indicating what happened
+    @MainActor
     @discardableResult
     func downloadWithCheck(_ episode: Episode, isAutoDownload: Bool = false, context: ModelContext) -> DownloadResult {
         let result = checkDownloadAllowed(episode, isAutoDownload: isAutoDownload, context: context)
@@ -130,13 +132,13 @@ final class DownloadManager: NSObject {
             episodeGUID: episode.guid,
             task: task,
             progressHandler: { [weak episode] progress in
-                DispatchQueue.main.async {
+                Task { @MainActor [weak episode] in
                     episode?.downloadProgress = progress
                 }
             }
         )
 
-        DispatchQueue.main.async {
+        Task { @MainActor [episode] in
             episode.downloadProgress = 0
         }
 
@@ -152,7 +154,7 @@ final class DownloadManager: NSObject {
         downloadTask.task.cancel()
         activeDownloads.removeValue(forKey: url)
 
-        DispatchQueue.main.async {
+        Task { @MainActor in
             episode.downloadProgress = nil
         }
     }
@@ -168,7 +170,7 @@ final class DownloadManager: NSObject {
             logger.error("Failed to delete download file: \(error.localizedDescription)")
         }
 
-        DispatchQueue.main.async {
+        Task { @MainActor in
             episode.localFilePath = nil
             episode.downloadProgress = nil
         }
@@ -297,16 +299,16 @@ final class DownloadManager: NSObject {
                         episodeGUID: episode.guid,
                         task: task,
                         progressHandler: { [weak episode] progress in
-                            DispatchQueue.main.async {
+                            Task { @MainActor [weak episode] in
                                 episode?.downloadProgress = progress
                             }
                         }
                     )
                     
                     // Ensure episode has download progress set
-                    DispatchQueue.main.async {
-                        if episode.downloadProgress == nil {
-                            episode.downloadProgress = 0
+                    Task { @MainActor [weak episode] in
+                        if episode?.downloadProgress == nil {
+                            episode?.downloadProgress = 0
                         }
                     }
                     

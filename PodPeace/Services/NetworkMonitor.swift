@@ -2,6 +2,7 @@ import Foundation
 import Network
 
 /// Monitors network connectivity status
+@MainActor
 @Observable
 final class NetworkMonitor {
     static let shared = NetworkMonitor()
@@ -32,9 +33,9 @@ final class NetworkMonitor {
         startMonitoring()
     }
 
-    private func startMonitoring() {
+    private nonisolated func startMonitoring() {
         monitor.pathUpdateHandler = { [weak self] path in
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 self?.actuallyConnected = path.status == .satisfied
                 self?.connectionType = self?.getConnectionType(path) ?? .unknown
             }

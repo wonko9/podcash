@@ -2,8 +2,8 @@ import Foundation
 import os
 
 /// Simple crash and error reporting utility
-final class CrashReporter {
-    static let shared = CrashReporter()
+final class CrashReporter: @unchecked Sendable {
+    nonisolated(unsafe) static let shared = CrashReporter()
     private let logger = Logger(subsystem: "com.personal.podpeace", category: "crash")
     
     private init() {

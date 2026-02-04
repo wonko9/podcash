@@ -4,8 +4,8 @@ import os
 
 /// Manages the playback queue
 @Observable
-final class QueueManager {
-    static let shared = QueueManager()
+final class QueueManager: @unchecked Sendable {
+    nonisolated(unsafe) static let shared = QueueManager()
 
     private let logger = AppLogger.data
     private var modelContext: ModelContext?

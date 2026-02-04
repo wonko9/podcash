@@ -1,8 +1,8 @@
 import Foundation
 
 /// Service for resolving podcast URLs and searching for podcasts
-final class PodcastLookupService {
-    static let shared = PodcastLookupService()
+final class PodcastLookupService: @unchecked Sendable {
+    nonisolated(unsafe) static let shared = PodcastLookupService()
     private init() {}
 
     // MARK: - URL Resolution

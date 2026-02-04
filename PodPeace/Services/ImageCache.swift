@@ -3,10 +3,10 @@ import Foundation
 
 /// Simple image cache with memory and disk storage
 actor ImageCache {
-    static let shared = ImageCache()
+    nonisolated(unsafe) static let shared = ImageCache()
 
     // NSCache is thread-safe, so we can access it synchronously from any thread
-    private static let memoryCache = NSCache<NSString, UIImage>()
+    nonisolated(unsafe) private static let memoryCache = NSCache<NSString, UIImage>()
     private let fileManager = FileManager.default
     private var cacheDirectory: URL?
     private var inFlightRequests: [String: Task<UIImage?, Never>] = [:]

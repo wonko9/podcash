@@ -1,10 +1,15 @@
 import Foundation
-import FeedKit
+@preconcurrency import FeedKit
 import SwiftData
 
+// Wrapper to make FeedKit's Result Sendable
+private struct SendableResult: @unchecked Sendable {
+    let value: Result<Feed, ParserError>
+}
+
 /// Service for fetching and parsing podcast RSS feeds
-final class FeedService {
-    static let shared = FeedService()
+final class FeedService: @unchecked Sendable {
+    nonisolated(unsafe) static let shared = FeedService()
     private init() {}
 
     /// Fetches and parses a podcast feed, returning a new Podcast with episodes
@@ -14,11 +19,13 @@ final class FeedService {
         }
 
         let parser = FeedParser(URL: url)
-        let result = await withCheckedContinuation { continuation in
+        // FeedKit's Result type is not Sendable, wrap it to make it safe
+        let wrappedResult = await withUnsafeContinuation { (continuation: UnsafeContinuation<SendableResult, Never>) in
             parser.parseAsync { result in
-                continuation.resume(returning: result)
+                continuation.resume(returning: SendableResult(value: result))
             }
         }
+        let result = wrappedResult.value
 
         switch result {
         case .success(let feed):
@@ -78,11 +85,13 @@ final class FeedService {
 
         // Parse the feed data
         let parser = FeedParser(data: data)
-        let result = await withCheckedContinuation { continuation in
+        // FeedKit's Result type is not Sendable, wrap it to make it safe
+        let wrappedResult = await withUnsafeContinuation { (continuation: UnsafeContinuation<SendableResult, Never>) in
             parser.parseAsync { result in
-                continuation.resume(returning: result)
+                continuation.resume(returning: SendableResult(value: result))
             }
         }
+        let result = wrappedResult.value
 
         switch result {
         case .success(let feed):
@@ -121,6 +130,7 @@ final class FeedService {
 
     /// Refreshes all podcasts in the library
     /// - Returns: Total number of new episodes added across all podcasts
+    @MainActor
     func refreshAllPodcasts(context: ModelContext) async -> Int {
         let descriptor = FetchDescriptor<Podcast>()
         guard let podcasts = try? context.fetch(descriptor) else { return 0 }
@@ -136,6 +146,7 @@ final class FeedService {
 
     /// Refreshes a specific list of podcasts
     /// - Returns: Total number of new episodes added
+    @MainActor
     func refreshPodcasts(_ podcasts: [Podcast], context: ModelContext) async -> Int {
         var totalNew = 0
         for podcast in podcasts {
@@ -147,14 +158,20 @@ final class FeedService {
     }
 
     /// Refreshes an existing podcast, adding new episodes
+    @MainActor
     func refreshPodcast(_ podcast: Podcast, context: ModelContext) async throws -> Int {
         let logger = AppLogger.feed
 
+        // Store feed URL before async call to avoid accessing podcast from wrong thread
+        let feedURL = podcast.feedURL
+        let podcastTitle = podcast.title
+        
         // Always do a full fetch (HTTP caching disabled - was causing missed episodes)
-        let (_, newEpisodes) = try await fetchPodcast(from: podcast.feedURL)
+        let (_, newEpisodes) = try await fetchPodcast(from: feedURL)
 
-        logger.info("[\(podcast.title)] Fetched \(newEpisodes.count) episodes")
+        logger.info("[\(podcastTitle)] Fetched \(newEpisodes.count) episodes")
 
+        // Access podcast.episodes only once and extract GUIDs
         let existingGUIDs = Set(podcast.episodes.map { $0.guid })
         var addedCount = 0
         var newlyAddedEpisodes: [Episode] = []
@@ -166,14 +183,14 @@ final class FeedService {
                 context.insert(episode)
                 addedCount += 1
                 newlyAddedEpisodes.append(episode)
-                logger.info("[\(podcast.title)] NEW: \(episode.title)")
+                logger.info("[\(podcastTitle)] NEW: \(episode.title)")
             }
         }
 
         if addedCount == 0 {
-            logger.info("[\(podcast.title)] No new episodes")
+            logger.info("[\(podcastTitle)] No new episodes")
         } else {
-            logger.info("[\(podcast.title)] Added \(addedCount) new episode(s)")
+            logger.info("[\(podcastTitle)] Added \(addedCount) new episode(s)")
             // Save immediately so @Query observers update in real-time
             try? context.save()
         }
@@ -185,17 +202,19 @@ final class FeedService {
 
         // Auto-download new episodes if enabled
         if shouldAutoDownload {
-            for episode in newlyAddedEpisodes {
-                // Check network preference for auto-downloads (skip confirmation for background refresh)
-                let result = DownloadManager.shared.checkDownloadAllowed(episode, isAutoDownload: true, context: context)
-                if case .started = result {
-                    DownloadManager.shared.download(episode)
+            await MainActor.run {
+                for episode in newlyAddedEpisodes {
+                    // Check network preference for auto-downloads (skip confirmation for background refresh)
+                    let result = DownloadManager.shared.checkDownloadAllowed(episode, isAutoDownload: true, context: context)
+                    if case .started = result {
+                        DownloadManager.shared.download(episode)
+                    }
+                    // Note: .wifiOnly will block, .askOnCellular treated as blocked for auto-downloads
                 }
-                // Note: .wifiOnly will block, .askOnCellular treated as blocked for auto-downloads
-            }
 
-            // Enforce per-podcast limit after downloads start
-            DownloadCleanupService.shared.enforcePerPodcastLimit(for: podcast, context: context)
+                // Enforce per-podcast limit after downloads start
+                DownloadCleanupService.shared.enforcePerPodcastLimit(for: podcast, context: context)
+            }
         }
 
         return addedCount

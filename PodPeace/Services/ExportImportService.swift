@@ -9,8 +9,8 @@ extension Notification.Name {
 
 /// Service for exporting and importing app data
 @Observable
-final class ExportImportService {
-    static let shared = ExportImportService()
+final class ExportImportService: @unchecked Sendable {
+    nonisolated(unsafe) static let shared = ExportImportService()
     
     private let logger = Logger(subsystem: "com.personal.podpeace", category: "ExportImport")
     

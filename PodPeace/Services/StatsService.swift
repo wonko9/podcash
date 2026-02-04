@@ -4,8 +4,8 @@ import os
 
 /// Tracks and computes listening statistics
 @Observable
-final class StatsService {
-    static let shared = StatsService()
+final class StatsService: @unchecked Sendable {
+    nonisolated(unsafe) static let shared = StatsService()
 
     private let logger = AppLogger.stats
     private var modelContext: ModelContext?

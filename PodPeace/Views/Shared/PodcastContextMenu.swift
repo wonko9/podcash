@@ -197,6 +197,7 @@ struct PodcastContextMenu: View {
         try? modelContext.save()
     }
 
+    @MainActor
     private func refreshPodcast() async {
         isRefreshing = true
         if let onRefresh {

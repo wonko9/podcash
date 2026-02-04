@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 @Model
-final class ListeningSession {
+final class ListeningSession: @unchecked Sendable {
     var id: UUID = UUID()
     var podcastFeedURL: String
     var podcastTitle: String

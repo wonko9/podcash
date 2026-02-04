@@ -70,11 +70,15 @@ final class RefreshManager {
 
         logger.info("Starting refresh of \(podcasts.count) podcasts (concurrency: \(self.concurrentFetches))")
 
+        // Extract persistent identifiers to pass to background tasks
+        let podcastIDs = podcasts.map { $0.persistentModelID }
+        let container = context.container
+
         // Result type: -1 = not modified, >= 0 = fetched (new episode count), nil = error
         await withTaskGroup(of: Int?.self) { group in
             var inFlight = 0
 
-            for podcast in podcasts {
+            for podcastID in podcastIDs {
                 // Wait if we've hit the concurrency limit
                 if inFlight >= concurrentFetches {
                     if let result = await group.next() {
@@ -90,7 +94,15 @@ final class RefreshManager {
                 }
 
                 group.addTask {
-                    try? await FeedService.shared.refreshPodcast(podcast, context: context)
+                    // Create a new background context for this task
+                    let backgroundContext = ModelContext(container)
+                    
+                    // Fetch the podcast in this background context
+                    guard let podcast = backgroundContext.model(for: podcastID) as? Podcast else {
+                        return nil
+                    }
+                    
+                    return try? await FeedService.shared.refreshPodcast(podcast, context: backgroundContext)
                 }
                 inFlight += 1
             }

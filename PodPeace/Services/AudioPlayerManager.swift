@@ -1,5 +1,5 @@
-import AVFoundation
-import MediaPlayer
+@preconcurrency import AVFoundation
+@preconcurrency import MediaPlayer
 import SwiftUI
 import SwiftData
 import Combine
@@ -624,12 +624,14 @@ final class AudioPlayerManager {
         if cachedArtwork == nil || cachedArtworkURL != artworkURLString {
             if let artworkURLString = artworkURLString,
                let artworkURL = URL(string: artworkURLString) {
-                Task.detached { [weak self] in
+                Task.detached {
                     if let (data, _) = try? await URLSession.shared.data(from: artworkURL),
                        let image = UIImage(data: data) {
-                        await MainActor.run {
+                        // Create artwork with a nonisolated closure that captures the image
+                        let artwork = MPMediaItemArtwork(boundsSize: image.size) { [image] _ in image }
+                        
+                        await MainActor.run { [weak self, artworkURLString, artwork] in
                             guard let self else { return }
-                            let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
                             self.cachedArtwork = artwork
                             self.cachedArtworkURL = artworkURLString
 

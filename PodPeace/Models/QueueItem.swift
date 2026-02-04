@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 @Model
-final class QueueItem {
+final class QueueItem: @unchecked Sendable {
     var episode: Episode?
     var sortOrder: Int = 0
     var dateAdded: Date = Date()

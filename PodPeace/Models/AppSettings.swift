@@ -16,7 +16,7 @@ enum DownloadPreference: Int, CaseIterable {
 }
 
 @Model
-final class AppSettings {
+final class AppSettings: @unchecked Sendable {
     var globalPlaybackSpeed: Double = 1.0
     var sleepTimerMinutes: Int?   // nil = off
     var sleepTimerEndTime: Date?  // when timer should fire

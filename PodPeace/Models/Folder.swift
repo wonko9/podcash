@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 @Model
-final class Folder {
+final class Folder: @unchecked Sendable {
     var id: UUID = UUID()
     var name: String
     var colorHex: String?

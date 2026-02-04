@@ -12,7 +12,7 @@ packages:
 
 settings:
   base:
-    SWIFT_VERSION: "5.9"
+    SWIFT_VERSION: "6.2"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: SHQSDJG35Q
 
@@ -35,6 +35,8 @@ targets:
     info:
       path: PodPeace/Info.plist
       properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen:
           UIColorName: ""
         UIBackgroundModes:

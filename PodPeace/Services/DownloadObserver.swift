@@ -5,8 +5,8 @@ import os
 
 /// Observes download notifications and updates SwiftData episodes
 @Observable
-final class DownloadObserver {
-    static let shared = DownloadObserver()
+final class DownloadObserver: @unchecked Sendable {
+    nonisolated(unsafe) static let shared = DownloadObserver()
 
     private let logger = AppLogger.download
     private var cancellables = Set<AnyCancellable>()

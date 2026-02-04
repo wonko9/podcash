@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 @Model
-final class Episode {
+final class Episode: @unchecked Sendable {
     @Attribute(.unique) var guid: String
     var title: String
     var episodeDescription: String?
