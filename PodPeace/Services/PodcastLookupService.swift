@@ -68,7 +68,112 @@ final class PodcastLookupService: @unchecked Sendable {
             )
         }
     }
+    
+    /// Look up a podcast by its feed URL using iTunes Search API
+    /// This is more reliable than searching by title for finding the correct iTunes ID
+    func lookupPodcastByFeedURL(_ feedURL: String) async throws -> PodcastSearchResult? {
+        // Extract a unique identifier from the feed URL to use as a search term
+        // For example, from "https://feeds.megaphone.fm/theezrakleinshow" extract "theezrakleinshow"
+        let searchTerm = extractSearchTermFromFeedURL(feedURL)
+        
+        guard !searchTerm.isEmpty else {
+            throw LookupError.invalidURL
+        }
+        
+        // Search using the extracted term
+        let results = try await searchPodcasts(query: searchTerm)
+        
+        // Find exact feed URL match
+        let normalizedFeedURL = feedURL.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        for result in results {
+            if let resultFeedURL = result.feedURL?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines),
+               resultFeedURL == normalizedFeedURL {
+                return result
+            }
+        }
+        
+        return nil
+    }
+    
+    private func extractSearchTermFromFeedURL(_ feedURL: String) -> String {
+        guard let url = URL(string: feedURL) else { return "" }
+        
+        // Try to extract meaningful search terms from the URL
+        let path = url.path
+        let host = url.host ?? ""
+        
+        // For feeds like "feeds.megaphone.fm/theezrakleinshow", extract "theezrakleinshow"
+        let pathComponents = path.components(separatedBy: "/").filter { !$0.isEmpty }
+        if let lastComponent = pathComponents.last {
+            // Remove common feed-related suffixes
+            let cleaned = lastComponent
+                .replacingOccurrences(of: ".xml", with: "")
+                .replacingOccurrences(of: ".rss", with: "")
+                .replacingOccurrences(of: "-feed", with: "")
+                .replacingOccurrences(of: "_feed", with: "")
+            
+            // Convert camelCase or kebab-case to space-separated words for better search
+            let withSpaces = cleaned
+                .replacingOccurrences(of: "-", with: " ")
+                .replacingOccurrences(of: "_", with: " ")
+            
+            return withSpaces
+        }
+        
+        // Fallback to host-based search
+        return host.components(separatedBy: ".").first ?? ""
+    }
 
+    /// Look up episode ID from iTunes API by matching episode title and date
+    func lookupEpisodeID(podcastID: String, episodeTitle: String, publishedDate: Date?) async throws -> String? {
+        let logger = AppLogger.feed
+        let urlString = "https://itunes.apple.com/lookup?id=\(podcastID)&entity=podcastEpisode&limit=200"
+        
+        guard let url = URL(string: urlString) else {
+            throw LookupError.invalidURL
+        }
+        
+        logger.debug("[iTunes Episode Lookup] Fetching episodes for podcast \(podcastID)")
+        let (data, _) = try await URLSession.shared.data(from: url)
+        let response = try JSONDecoder().decode(iTunesLookupResponse.self, from: data)
+        
+        logger.debug("[iTunes Episode Lookup] Got \(response.resultCount) results")
+        
+        // Count how many are actually episodes
+        let episodeCount = response.results.filter { $0.kind == "podcast-episode" }.count
+        logger.debug("[iTunes Episode Lookup] Found \(episodeCount) episodes")
+        
+        // Normalize the episode title for matching
+        let normalizedTitle = episodeTitle.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        logger.debug("[iTunes Episode Lookup] Looking for episode: '\(normalizedTitle)'")
+        
+        // Try to find a match by title
+        for result in response.results where result.kind == "podcast-episode" {
+            let resultTitle = (result.trackName ?? "").lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            // Exact title match
+            if resultTitle == normalizedTitle {
+                logger.debug("[iTunes Episode Lookup] ✓ Exact match found: '\(resultTitle)'")
+                return String(result.trackId ?? 0)
+            }
+            
+            // Close title match with date verification
+            if let publishedDate = publishedDate,
+               let resultDate = result.releaseDate,
+               resultTitle.contains(normalizedTitle) || normalizedTitle.contains(resultTitle) {
+                // Check if dates are within 7 days of each other
+                let timeDiff = abs(resultDate.timeIntervalSince(publishedDate))
+                if timeDiff < 7 * 24 * 60 * 60 {
+                    logger.debug("[iTunes Episode Lookup] ✓ Close match found: '\(resultTitle)' (date match)")
+                    return String(result.trackId ?? 0)
+                }
+            }
+        }
+        
+        logger.debug("[iTunes Episode Lookup] ✗ No match found for '\(normalizedTitle)'")
+        return nil
+    }
+    
     // MARK: - Apple Podcasts Resolution
 
     private func resolveApplePodcast(id: String) async throws -> String {
@@ -375,4 +480,39 @@ private struct iTunesPodcast: Codable {
     let artworkUrl100: String?
     let artworkUrl600: String?
     let feedUrl: String?
+    
+    // Episode-specific fields
+    let kind: String?
+    let trackId: Int?
+    let trackName: String?
+    let releaseDate: Date?
+    
+    enum CodingKeys: String, CodingKey {
+        case collectionId, collectionName, artistName
+        case artworkUrl100, artworkUrl600, feedUrl
+        case kind, trackId, trackName, releaseDate
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        collectionId = try container.decode(Int.self, forKey: .collectionId)
+        collectionName = try container.decode(String.self, forKey: .collectionName)
+        artistName = try? container.decode(String.self, forKey: .artistName)
+        artworkUrl100 = try? container.decode(String.self, forKey: .artworkUrl100)
+        artworkUrl600 = try? container.decode(String.self, forKey: .artworkUrl600)
+        feedUrl = try? container.decode(String.self, forKey: .feedUrl)
+        
+        // Episode fields (optional)
+        kind = try? container.decode(String.self, forKey: .kind)
+        trackId = try? container.decode(Int.self, forKey: .trackId)
+        trackName = try? container.decode(String.self, forKey: .trackName)
+        
+        // Parse release date with ISO8601 decoder
+        if let dateString = try? container.decode(String.self, forKey: .releaseDate) {
+            let formatter = ISO8601DateFormatter()
+            releaseDate = formatter.date(from: dateString)
+        } else {
+            releaseDate = nil
+        }
+    }
 }

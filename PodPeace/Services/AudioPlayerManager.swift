@@ -368,8 +368,16 @@ final class AudioPlayerManager {
         sleepTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             if let remaining = self.sleepTimerRemaining, remaining <= 0 {
+                // Fully stop playback, not just pause
                 self.pause()
+                self.saveCurrentPosition()
                 self.cancelSleepTimer()
+                
+                // Deactivate audio session to prevent auto-resume
+                self.deactivateAudioSession()
+                
+                // Clear Now Playing to remove lock screen controls
+                self.clearNowPlayingInfo()
             }
         }
     }
@@ -546,6 +554,8 @@ final class AudioPlayerManager {
     private func setupRemoteCommands() {
         let commandCenter = MPRemoteCommandCenter.shared()
 
+        // Enable play command
+        commandCenter.playCommand.isEnabled = true
         commandCenter.playCommand.addTarget { [weak self] _ in
             DispatchQueue.main.async {
                 self?.resume()
@@ -553,6 +563,8 @@ final class AudioPlayerManager {
             return .success
         }
 
+        // Enable pause command
+        commandCenter.pauseCommand.isEnabled = true
         commandCenter.pauseCommand.addTarget { [weak self] _ in
             DispatchQueue.main.async {
                 self?.pause()
@@ -560,6 +572,8 @@ final class AudioPlayerManager {
             return .success
         }
 
+        // Enable toggle play/pause command (important for some Bluetooth devices)
+        commandCenter.togglePlayPauseCommand.isEnabled = true
         commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
             DispatchQueue.main.async {
                 self?.togglePlayPause()
@@ -567,6 +581,8 @@ final class AudioPlayerManager {
             return .success
         }
 
+        // Enable skip forward command
+        commandCenter.skipForwardCommand.isEnabled = true
         commandCenter.skipForwardCommand.preferredIntervals = [NSNumber(value: skipForwardInterval)]
         commandCenter.skipForwardCommand.addTarget { [weak self] _ in
             DispatchQueue.main.async {
@@ -575,6 +591,8 @@ final class AudioPlayerManager {
             return .success
         }
 
+        // Enable skip backward command
+        commandCenter.skipBackwardCommand.isEnabled = true
         commandCenter.skipBackwardCommand.preferredIntervals = [NSNumber(value: skipBackwardInterval)]
         commandCenter.skipBackwardCommand.addTarget { [weak self] _ in
             DispatchQueue.main.async {
@@ -583,6 +601,8 @@ final class AudioPlayerManager {
             return .success
         }
 
+        // Enable seek command
+        commandCenter.changePlaybackPositionCommand.isEnabled = true
         commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
             guard let event = event as? MPChangePlaybackPositionCommandEvent else {
                 return .commandFailed
@@ -592,6 +612,10 @@ final class AudioPlayerManager {
             }
             return .success
         }
+        
+        // Disable commands we don't support
+        commandCenter.nextTrackCommand.isEnabled = false
+        commandCenter.previousTrackCommand.isEnabled = false
     }
 
     private func updateRemoteCommandIntervals() {

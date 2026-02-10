@@ -29,11 +29,17 @@ final class FeedService: @unchecked Sendable {
 
         switch result {
         case .success(let feed):
-            var (podcast, episodes) = try parseFeed(feed, feedURL: urlString)
+            let (podcast, episodes) = try parseFeed(feed, feedURL: urlString)
 
-            // If this is a private feed, try to find the public version
-            if podcast.isPrivateFeed {
-                await findPublicFeed(for: podcast)
+            // Always try to find iTunes ID and public feed URL for better sharing
+            // This is especially important for private feeds, but useful for all podcasts
+            await findPublicFeed(for: podcast)
+            
+            // Look up iTunes episode IDs for better sharing (async, don't block)
+            if let itunesID = podcast.itunesID {
+                Task {
+                    await lookupEpisodeIDs(for: episodes, podcastID: itunesID)
+                }
             }
 
             return (podcast, episodes)
@@ -102,29 +108,112 @@ final class FeedService: @unchecked Sendable {
         }
     }
 
-    /// Searches iTunes for the public version of a private podcast
+    /// Look up iTunes episode IDs for episodes to enable proper episode sharing
+    private func lookupEpisodeIDs(for episodes: [Episode], podcastID: String) async {
+        let logger = AppLogger.feed
+        logger.debug("[Episode ID Lookup] Looking up episode IDs for podcast \(podcastID)")
+        
+        // Look up the first few episodes (don't overwhelm the API)
+        let episodesToLookup = Array(episodes.prefix(10))
+        
+        for episode in episodesToLookup {
+            // Skip if we already have an iTunes episode ID
+            if episode.itunesEpisodeID != nil {
+                continue
+            }
+            
+            do {
+                if let episodeID = try await PodcastLookupService.shared.lookupEpisodeID(
+                    podcastID: podcastID,
+                    episodeTitle: episode.title,
+                    publishedDate: episode.publishedDate
+                ) {
+                    episode.itunesEpisodeID = episodeID
+                    logger.debug("[Episode ID Lookup] Found iTunes episode ID for '\(episode.title)': \(episodeID)")
+                }
+            } catch {
+                logger.error("[Episode ID Lookup] Failed to lookup episode ID for '\(episode.title)': \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    /// Searches iTunes to find and store the podcast's iTunes ID and public feed URL
+    /// This enables episode sharing via Apple Podcasts URLs
     private func findPublicFeed(for podcast: Podcast) async {
+        let logger = AppLogger.feed
+        
         do {
+            // Strategy 1: Try to look up by feed URL directly (most reliable)
+            logger.debug("[iTunes Lookup] Attempting feed URL lookup for: \(podcast.feedURL)")
+            if let result = try? await PodcastLookupService.shared.lookupPodcastByFeedURL(podcast.feedURL) {
+                // Verify the title matches reasonably well
+                let normalizedPodcastTitle = podcast.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                let normalizedResultTitle = result.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                // Only use this result if titles are similar
+                if normalizedPodcastTitle.contains(normalizedResultTitle) || 
+                   normalizedResultTitle.contains(normalizedPodcastTitle) ||
+                   normalizedPodcastTitle == normalizedResultTitle {
+                    podcast.itunesID = result.id
+                    logger.info("[iTunes Lookup] ✓ Found iTunes ID via feed URL lookup: \(result.id) (Podcast: '\(result.title)')")
+                    
+                    if let feedURL = result.feedURL {
+                        podcast.publicFeedURL = feedURL
+                        logger.debug("[iTunes Lookup] Stored public feed URL: \(feedURL)")
+                    }
+                    return
+                } else {
+                    logger.warning("[iTunes Lookup] Feed URL matched but titles don't match: '\(podcast.title)' vs '\(result.title)'")
+                }
+            }
+            
+            // Strategy 2: Fall back to title-based search
+            logger.debug("[iTunes Lookup] Feed URL lookup failed, trying title search: '\(podcast.title)'")
             let results = try await PodcastLookupService.shared.searchPodcasts(query: podcast.title)
+            logger.debug("[iTunes Lookup] Found \(results.count) results")
 
             // Find a match with the same or very similar title
             let normalizedTitle = podcast.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalizedFeedURL = podcast.feedURL.lowercased()
 
             for result in results {
                 let resultTitle = result.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                let resultFeedURL = result.feedURL?.lowercased() ?? ""
+                
+                logger.debug("[iTunes Lookup] Comparing '\(normalizedTitle)' with '\(resultTitle)'")
+                
+                // First priority: exact feed URL match (most reliable)
+                if !resultFeedURL.isEmpty && normalizedFeedURL == resultFeedURL {
+                    podcast.itunesID = result.id
+                    logger.info("[iTunes Lookup] ✓ Found iTunes ID via feed URL match for '\(podcast.title)': \(result.id)")
+                    
+                    if let feedURL = result.feedURL {
+                        podcast.publicFeedURL = feedURL
+                        logger.debug("[iTunes Lookup] Stored public feed URL: \(feedURL)")
+                    }
+                    return
+                }
 
-                // Exact match or very close
+                // Second priority: title match
                 if resultTitle == normalizedTitle ||
                    resultTitle.contains(normalizedTitle) ||
                    normalizedTitle.contains(resultTitle) {
+                    // Store iTunes ID for episode sharing
+                    podcast.itunesID = result.id
+                    logger.info("[iTunes Lookup] ✓ Found iTunes ID via title match for '\(podcast.title)': \(result.id)")
+                    
                     if let feedURL = result.feedURL {
                         podcast.publicFeedURL = feedURL
-                        return
+                        logger.debug("[iTunes Lookup] Stored public feed URL: \(feedURL)")
                     }
+                    return
                 }
             }
+            
+            logger.warning("[iTunes Lookup] ✗ No iTunes match found for '\(podcast.title)'")
+            logger.debug("[iTunes Lookup] Feed URL was: \(podcast.feedURL)")
         } catch {
-            // Silently fail - sharing will just use the private URL
+            logger.error("[iTunes Lookup] Failed to search iTunes for '\(podcast.title)': \(error.localizedDescription)")
         }
     }
 

@@ -10,21 +10,22 @@ struct NowPlayingView: View {
     @State private var showSpeedPicker = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Close button row
-            HStack {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 44, height: 44)
+        NavigationStack {
+            VStack(spacing: 0) {
+                // Close button row
+                HStack {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 44, height: 44)
+                    }
+                    Spacer()
                 }
-                Spacer()
-            }
-            .padding(.horizontal)
+                .padding(.horizontal)
 
             if let episode = playerManager.currentEpisode {
                 Spacer()
@@ -56,9 +57,13 @@ struct NowPlayingView: View {
                         .multilineTextAlignment(.center)
 
                     if let podcast = episode.podcast {
-                        Text(podcast.title)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                        NavigationLink {
+                            PodcastDetailView(podcast: podcast)
+                        } label: {
+                            Text(podcast.title)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
                 .padding(.horizontal)
@@ -251,6 +256,7 @@ struct NowPlayingView: View {
                 podcast: playerManager.currentEpisode?.podcast
             )
             .presentationDetents([.medium])
+        }
         }
     }
 

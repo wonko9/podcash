@@ -50,19 +50,26 @@ final class Podcast: @unchecked Sendable {
 
     /// The URL to use when sharing - prefers iTunes URL, falls back to public feed URL or feed URL
     var shareURL: String {
+        let logger = AppLogger.data
+        
         // Prefer iTunes URL for sharing (more universal)
         if let itunesID {
-            return "https://podcasts.apple.com/podcast/id\(itunesID)"
+            let url = "https://podcasts.apple.com/podcast/id\(itunesID)"
+            logger.debug("[Share] Podcast '\(self.title)' using iTunes URL: \(url)")
+            return url
         }
         // Fall back to public feed URL (for private feeds without iTunes ID)
         if let publicFeedURL {
+            logger.debug("[Share] Podcast '\(self.title)' using public feed URL: \(publicFeedURL)")
             return publicFeedURL
         }
         // Last resort: use the feed URL (but not if it's a private feed with auth tokens)
         if !isPrivateFeed {
-            return feedURL
+            logger.debug("[Share] Podcast '\(self.title)' using feed URL: \(self.feedURL)")
+            return self.feedURL
         }
         // Private feed with no public alternative - return empty to prevent sharing
+        logger.debug("[Share] Podcast '\(self.title)' is private with no public alternative - cannot share")
         return ""
     }
 

@@ -61,6 +61,26 @@ struct PodcastContextMenu: View {
         } label: {
             Label("Refresh", systemImage: "arrow.clockwise")
         }
+        
+        // Re-lookup iTunes ID (always available)
+        Button {
+            Task {
+                await fixSharing()
+            }
+        } label: {
+            Label("Re-lookup iTunes ID", systemImage: "link.badge.plus")
+        }
+        
+        // Lookup Episode IDs
+        if podcast.itunesID != nil {
+            Button {
+                Task {
+                    await lookupEpisodeIDs()
+                }
+            } label: {
+                Label("Lookup Episode IDs", systemImage: "link.circle")
+            }
+        }
 
         // Auto-Download Toggle
         Button {
@@ -246,6 +266,73 @@ struct PodcastContextMenu: View {
             _ = try? await FeedService.shared.refreshPodcast(podcast, context: modelContext)
         }
         isRefreshing = false
+    }
+    
+    @MainActor
+    private func fixSharing() async {
+        let logger = AppLogger.data
+        logger.info("[Fix Sharing] Attempting to fix sharing for '\(podcast.title)'")
+        
+        // Try feed URL lookup first
+        if let result = try? await PodcastLookupService.shared.lookupPodcastByFeedURL(podcast.feedURL) {
+            podcast.itunesID = result.id
+            if let feedURL = result.feedURL {
+                podcast.publicFeedURL = feedURL
+            }
+            logger.info("[Fix Sharing] ✓ Fixed sharing for '\(podcast.title)' - iTunes ID: \(result.id)")
+            try? modelContext.save()
+            return
+        }
+        
+        // Fall back to title search
+        if let results = try? await PodcastLookupService.shared.searchPodcasts(query: podcast.title),
+           let firstResult = results.first {
+            podcast.itunesID = firstResult.id
+            if let feedURL = firstResult.feedURL {
+                podcast.publicFeedURL = feedURL
+            }
+            logger.info("[Fix Sharing] ✓ Fixed sharing for '\(podcast.title)' - iTunes ID: \(firstResult.id)")
+            try? modelContext.save()
+        } else {
+            logger.warning("[Fix Sharing] ✗ Could not find iTunes ID for '\(podcast.title)'")
+        }
+    }
+    
+    @MainActor
+    private func lookupEpisodeIDs() async {
+        let logger = AppLogger.data
+        guard let itunesID = podcast.itunesID else {
+            logger.warning("[Episode ID Lookup] No iTunes ID for '\(podcast.title)'")
+            return
+        }
+        
+        logger.info("[Episode ID Lookup] Looking up episode IDs for '\(podcast.title)'")
+        
+        // Get the first 20 episodes
+        let episodesToLookup = Array(podcast.episodes.prefix(20))
+        
+        for episode in episodesToLookup {
+            // Skip if we already have an iTunes episode ID
+            if episode.itunesEpisodeID != nil {
+                continue
+            }
+            
+            do {
+                if let episodeID = try await PodcastLookupService.shared.lookupEpisodeID(
+                    podcastID: itunesID,
+                    episodeTitle: episode.title,
+                    publishedDate: episode.publishedDate
+                ) {
+                    episode.itunesEpisodeID = episodeID
+                    logger.info("[Episode ID Lookup] ✓ Found episode ID for '\(episode.title)': \(episodeID)")
+                }
+            } catch {
+                logger.error("[Episode ID Lookup] Failed for '\(episode.title)': \(error.localizedDescription)")
+            }
+        }
+        
+        try? modelContext.save()
+        logger.info("[Episode ID Lookup] Completed for '\(podcast.title)'")
     }
 
     private func downloadLatest(count: Int) {

@@ -49,9 +49,13 @@ struct EpisodeDetailView: View {
                             .multilineTextAlignment(.center)
 
                         if let podcast = episode.podcast {
-                            Text(podcast.title)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                            NavigationLink {
+                                PodcastDetailView(podcast: podcast)
+                            } label: {
+                                Text(podcast.title)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
 
                         // Metadata row
@@ -102,7 +106,7 @@ struct EpisodeDetailView: View {
                     .padding(.horizontal)
 
                     // Action buttons row
-                    HStack(spacing: 32) {
+                    HStack(spacing: 24) {
                         // Star
                         Button {
                             toggleStar()
@@ -154,6 +158,21 @@ struct EpisodeDetailView: View {
                             }
                         }
                         .buttonStyle(.plain)
+                        
+                        // Share (only if episode can be shared)
+                        if episode.canShare {
+                            ShareLink(item: episode.shareURL) {
+                                VStack(spacing: 4) {
+                                    Image(systemName: "square.and.arrow.up")
+                                        .font(.title2)
+                                        .foregroundStyle(.secondary)
+                                    Text("Share")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                     .padding(.horizontal)
 
@@ -201,23 +220,11 @@ struct EpisodeDetailView: View {
                 }
 
                 ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        Button {
-                            episode.isPlayed.toggle()
-                        } label: {
-                            Label(
-                                episode.isPlayed ? "Mark Unplayed" : "Mark Played",
-                                systemImage: episode.isPlayed ? "circle" : "checkmark.circle"
-                            )
-                        }
-
-                        if episode.canShare {
-                            ShareLink(item: episode.shareURL) {
-                                Label("Share", systemImage: "square.and.arrow.up")
-                            }
-                        }
+                    Button {
+                        episode.isPlayed.toggle()
                     } label: {
-                        Image(systemName: "ellipsis.circle")
+                        Image(systemName: episode.isPlayed ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(episode.isPlayed ? .green : .secondary)
                     }
                 }
             }
